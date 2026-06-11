@@ -11,11 +11,34 @@ function getClassTimes(dateISO) {
     return null;
 }
 
-async function bookClass(date) {
+function normalizeDate(raw) {
+    if (!raw) return null;
+
+    // Normalize whatever the frontend/HubSpot sends to YYYY-MM-DD:
+    // epoch milliseconds, MM/DD/YYYY (or MM-DD-YYYY), ISO date, or Date object
+    const s = raw instanceof Date ? raw.toISOString() : String(raw).trim();
+    const usFormat = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+
+    if (/^\d+$/.test(s)) {
+        return new Date(Number(s)).toISOString().slice(0, 10);
+    }
+
+    if (usFormat) {
+        return `${usFormat[3]}-${usFormat[1].padStart(2, '0')}-${usFormat[2].padStart(2, '0')}`;
+    }
+
+    return s.slice(0, 10);
+}
+
+async function bookClass(date, bookingData = {}) {
     const times = getClassTimes(date);
     if (!times) return { ok: false, reason: 'No classes on that day' };
 
-    const booking = new Booking({ date });
+    const booking = new Booking({
+        ...bookingData,
+        date,
+        class_date: bookingData.class_date || date,
+    });
     await booking.save();
 
     let outlookEventCreated = false;
@@ -31,7 +54,8 @@ async function bookClass(date) {
 
 router.post('/', async (req, res) => {
     try {
-        const result = await bookClass(req.body.date);
+        const date = normalizeDate(req.body.class_date ?? req.body.date);
+        const result = await bookClass(date, req.body);
         if (!result.ok) return res.status(400).json({ message: result.reason });
         res.status(201).json(result);
     } catch (err) {
@@ -55,20 +79,9 @@ router.post('/hubspot-webhook', async (req, res) => {
             return res.status(400).json({ message: 'No class_date in payload' });
         }
 
-        // Normalize whatever HubSpot sends to YYYY-MM-DD:
-        // epoch milliseconds, MM/DD/YYYY (or MM-DD-YYYY), or YYYY-MM-DD
-        const s = String(raw).trim();
-        const usFormat = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-        let date;
-        if (/^\d+$/.test(s)) {
-            date = new Date(Number(s)).toISOString().slice(0, 10);
-        } else if (usFormat) {
-            date = `${usFormat[3]}-${usFormat[1].padStart(2, '0')}-${usFormat[2].padStart(2, '0')}`;
-        } else {
-            date = s.slice(0, 10);
-        }
+        const date = normalizeDate(raw);
 
-        const result = await bookClass(date);
+        const result = await bookClass(date, { class_date: date });
         if (!result.ok) {
             console.error(`Webhook booking rejected for ${date}: ${result.reason}`);
             return res.status(400).json({ message: result.reason });

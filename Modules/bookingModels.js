@@ -4,7 +4,33 @@ const bookingSchema = new mongoose.Schema({
     date: {
         type: String,
         required: true,
-    }
-})
+    },
+    email: String,
+    address: String,
+    city: String,
+    fullname_state: String,
+    zip: String,
+    what_gender_do_you_identify_as_: String,
+    what_is_your_racial_and_ethnic_identity_: String,
+    class_date: String,
+    are_you_still_finishing_high_school: String,
+    whats_the_full_name_of_your_school: String,
+    what_grade_are_you_currently_in: String,
+    highest_level_of_education_: String,
+    i_or_a_family_member_i_live_with_receive_the_following_type_of_public_assistancecheck_all_that_apply: [String],
+    please_check_all_of_these_situations_that_apply_to_you: [String],
+    are_you_a_parent: String,
+    how_many_children_do_you_have: String,
+    are_you_a_single_parent: String,
+    are_you_involved_in_the_justice_system: String,
+    what_is_your_status_in_the_justice_system_check_all_that_apply: [String],
+    what_is_your_offense_status_check_all_that_apply: [String],
+    what_is_your_system_level_check_all_that_apply: [String],
+    do_you_grant_permission_for_your_data_as_it_relates_to_this_program_to_be_collected_and_tracked: String,
+    i_consent_to_the_irrevocable_right_to_use_my_name__or_a_fictional_name___statement_s__story__photog: Boolean,
+    digital_signature: String,
+    date_signed: String,
+    whats_your_employment_status_pick_only_1: String,
+}, { timestamps: true });
 const Booking = mongoose.model('Booking', bookingSchema);
 export default Booking;
