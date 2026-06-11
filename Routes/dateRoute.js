@@ -40,8 +40,7 @@ router.post('/', async (req, res) => {
     }
 });
 
-// Called by a HubSpot workflow webhook when the form is submitted.
-// Finds the class_date contact property in the payload and books it.
+
 router.post('/hubspot-webhook', async (req, res) => {
     try {
         console.log('HubSpot webhook payload:', JSON.stringify(req.body));
@@ -56,11 +55,18 @@ router.post('/hubspot-webhook', async (req, res) => {
             return res.status(400).json({ message: 'No class_date in payload' });
         }
 
-        // HubSpot date properties arrive as epoch milliseconds (midnight UTC);
-        // a plain YYYY-MM-DD string is passed through as-is
-        const date = /^\d+$/.test(String(raw))
-            ? new Date(Number(raw)).toISOString().slice(0, 10)
-            : String(raw).slice(0, 10);
+        // Normalize whatever HubSpot sends to YYYY-MM-DD:
+        // epoch milliseconds, MM/DD/YYYY (or MM-DD-YYYY), or YYYY-MM-DD
+        const s = String(raw).trim();
+        const usFormat = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+        let date;
+        if (/^\d+$/.test(s)) {
+            date = new Date(Number(s)).toISOString().slice(0, 10);
+        } else if (usFormat) {
+            date = `${usFormat[3]}-${usFormat[1].padStart(2, '0')}-${usFormat[2].padStart(2, '0')}`;
+        } else {
+            date = s.slice(0, 10);
+        }
 
         const result = await bookClass(date);
         if (!result.ok) {
