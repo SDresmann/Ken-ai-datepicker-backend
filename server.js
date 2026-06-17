@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import bookingRoutes from './Routes/dateRoute.js';
+import { startCronJobs } from './services/cronJobs.js';
 
 dotenv.config();
 
@@ -22,4 +23,5 @@ app.use('/api/bookings', bookingRoutes);
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+  startCronJobs();
 });

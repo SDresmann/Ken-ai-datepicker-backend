@@ -1,6 +1,7 @@
 import express from 'express';
 import Booking from '../Modules/bookingModels.js';
 import { createOutlookEvent } from '../services/outlookServices.js';
+import { upsertHubSpotContact } from '../services/hubspotService.js';
 const router = express.Router();
 
 // Tue-Thu 6-7pm, Fri 2-5pm
@@ -28,6 +29,11 @@ function normalizeDate(raw) {
     }
 
     return s.slice(0, 10);
+}
+
+function toHubSpotDateValue(dateISO) {
+    const [year, month, day] = dateISO.split('-').map(Number);
+    return String(Date.UTC(year, month - 1, day));
 }
 
 async function bookClass(date, bookingData = {}) {
@@ -61,6 +67,35 @@ router.post('/', async (req, res) => {
     } catch (err) {
         console.error('Booking failed:', err.message || err);
         res.status(500).json({ message: 'Booking failed' });
+    }
+});
+
+router.post('/hubspot-step-one', async (req, res) => {
+    try {
+        const date = normalizeDate(req.body.class_date);
+
+        if (!req.body.email || !date) {
+            return res.status(400).json({ message: 'Email and class date are required' });
+        }
+
+        const contact = await upsertHubSpotContact({
+            firstname: req.body.first_name,
+            lastname: req.body.last_name,
+            email: req.body.email,
+            address: req.body.address,
+            city: req.body.city,
+            state: req.body.fullname_state,
+            zip: req.body.zip,
+            gender: req.body.what_gender_do_you_identify_as_,
+            what_is_your_racial_and_ethnic_identity_: req.body.what_is_your_racial_and_ethnic_identity_,
+            start_date: date,
+            class_date: toHubSpotDateValue(date),
+        });
+
+        res.status(200).json({ ok: true, contact });
+    } catch (err) {
+        console.error('HubSpot step one sync failed:', err.response?.data || err.message || err);
+        res.status(500).json({ message: 'HubSpot sync failed' });
     }
 });
 
