@@ -92,7 +92,15 @@ router.post('/hubspot-step-one', async (req, res) => {
             class_date: toHubSpotDateValue(date),
         });
 
-        res.status(200).json({ ok: true, contact });
+        res.status(200).json({
+            ok: true,
+            received: {
+                first_name: req.body.first_name,
+                last_name: req.body.last_name,
+                email: req.body.email,
+            },
+            ...contact,
+        });
     } catch (err) {
         console.error('HubSpot step one sync failed:', err.response?.data || err.message || err);
         res.status(500).json({ message: 'HubSpot sync failed' });

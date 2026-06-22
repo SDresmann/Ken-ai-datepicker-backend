@@ -15,18 +15,23 @@ function cleanProperties(properties) {
 }
 
 async function filterKnownContactProperties(properties, config) {
-  const response = await axios.get(HUBSPOT_CONTACT_PROPERTIES_URL, config);
-  const propertyNames = new Set(response.data.results.map((property) => property.name));
-  const knownProperties = Object.fromEntries(
-    Object.entries(properties).filter(([name]) => propertyNames.has(name))
-  );
-  const skippedProperties = Object.keys(properties).filter((name) => !propertyNames.has(name));
+  try {
+    const response = await axios.get(HUBSPOT_CONTACT_PROPERTIES_URL, config);
+    const propertyNames = new Set(response.data.results.map((property) => property.name));
+    const knownProperties = Object.fromEntries(
+      Object.entries(properties).filter(([name]) => propertyNames.has(name))
+    );
+    const skippedProperties = Object.keys(properties).filter((name) => !propertyNames.has(name));
 
-  if (skippedProperties.length) {
-    console.warn(`Skipping unknown HubSpot contact properties: ${skippedProperties.join(', ')}`);
+    if (skippedProperties.length) {
+      console.warn(`Skipping unknown HubSpot contact properties: ${skippedProperties.join(', ')}`);
+    }
+
+    return knownProperties;
+  } catch (err) {
+    console.warn('[HubSpot] Could not verify contact properties; syncing provided payload:', err.response?.data || err.message || err);
+    return properties;
   }
-
-  return knownProperties;
 }
 
 async function findContactByEmail(email, config) {
@@ -122,9 +127,9 @@ export async function upsertHubSpotContact(properties) {
       payload,
       config
     );
-    return response.data;
+    return { action: 'updated', contact: response.data };
   }
 
   const response = await axios.post(HUBSPOT_CONTACTS_URL, payload, config);
-  return response.data;
+  return { action: 'created', contact: response.data };
 }
