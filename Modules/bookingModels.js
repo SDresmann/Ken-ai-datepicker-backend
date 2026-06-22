@@ -8,6 +8,7 @@ const bookingSchema = new mongoose.Schema({
     first_name: String,
     last_name: String,
     email: String,
+    phone: String,
     address: String,
     city: String,
     fullname_state: String,
@@ -35,6 +36,10 @@ const bookingSchema = new mongoose.Schema({
     digital_signature: String,
     date_signed: String,
     whats_your_employment_status_pick_only_1: String,
+    is_complete: {
+        type: Boolean,
+        default: false,
+    },
 }, { timestamps: true });
 const Booking = mongoose.model('Booking', bookingSchema);
 export default Booking;

@@ -40,12 +40,20 @@ async function bookClass(date, bookingData = {}) {
     const times = getClassTimes(date);
     if (!times) return { ok: false, reason: 'No classes on that day' };
 
-    const booking = new Booking({
+    const classDate = bookingData.class_date || date;
+    const bookingPayload = {
         ...bookingData,
         date,
-        class_date: bookingData.class_date || date,
-    });
-    await booking.save();
+        class_date: classDate,
+        is_complete: true,
+    };
+    const booking = bookingData.email
+        ? await Booking.findOneAndUpdate(
+            { email: bookingData.email, class_date: classDate },
+            { $set: bookingPayload },
+            { new: true, upsert: true }
+        )
+        : await Booking.create(bookingPayload);
 
     let outlookEventCreated = false;
     try {
@@ -78,10 +86,35 @@ router.post('/hubspot-step-one', async (req, res) => {
             return res.status(400).json({ message: 'Email and class date are required' });
         }
 
+        const stepOneBooking = await Booking.findOneAndUpdate(
+            { email: req.body.email, class_date: date },
+            {
+                $set: {
+                    first_name: req.body.first_name,
+                    last_name: req.body.last_name,
+                    email: req.body.email,
+                    phone: req.body.phone,
+                    address: req.body.address,
+                    city: req.body.city,
+                    fullname_state: req.body.fullname_state,
+                    zip: req.body.zip,
+                    what_gender_do_you_identify_as_: req.body.what_gender_do_you_identify_as_,
+                    what_is_your_racial_and_ethnic_identity_: req.body.what_is_your_racial_and_ethnic_identity_,
+                    class_date: date,
+                    class_date_option_2: req.body.class_date_option_2 || '',
+                    class_date_option_3: req.body.class_date_option_3 || '',
+                    date,
+                    is_complete: false,
+                },
+            },
+            { new: true, upsert: true }
+        );
+
         const contact = await upsertHubSpotContact({
             firstname: req.body.first_name,
             lastname: req.body.last_name,
             email: req.body.email,
+            phone: req.body.phone,
             address: req.body.address,
             city: req.body.city,
             state: req.body.fullname_state,
@@ -94,10 +127,12 @@ router.post('/hubspot-step-one', async (req, res) => {
 
         res.status(200).json({
             ok: true,
+            booking: stepOneBooking,
             received: {
                 first_name: req.body.first_name,
                 last_name: req.body.last_name,
                 email: req.body.email,
+                phone: req.body.phone,
             },
             ...contact,
         });
