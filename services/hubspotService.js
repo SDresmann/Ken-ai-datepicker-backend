@@ -3,12 +3,17 @@ import { HubSpotSyncError } from './hubspotErrors.js';
 
 const HUBSPOT_CONTACTS_URL = 'https://api.hubapi.com/crm/v3/objects/contacts';
 const HUBSPOT_CONTACT_SEARCH_URL = 'https://api.hubapi.com/crm/v3/objects/contacts/search';
+const HUBSPOT_CONTACT_PROPERTIES_URL = 'https://api.hubapi.com/crm/v3/properties/contacts';
 
-// Custom + mapped date fields — all use the same HubSpot date format as class_date.
-const HUBSPOT_DATE_PROPERTIES = new Set([
+const WORKSHOP_DATE_PROPERTIES = new Set([
   'class_date',
-  'choose_your_2nd_date_for_career_readiness',
-  'choose_your_3rd_date_for_career_readiness',
+  'choose_the_2nd_date_for_your_career_readiness_class_work',
+  'choose_the_3rd_date_for_your_career_readiness_class_work',
+]);
+
+const REQUIRED_WORKSHOP_DATE_PROPERTIES = new Set([
+  'choose_the_2nd_date_for_your_career_readiness_class_work',
+  'choose_the_3rd_date_for_your_career_readiness_class_work',
 ]);
 
 function getAccessToken() {
@@ -46,12 +51,92 @@ function toHubSpotDateValue(rawValue) {
   return String(Date.UTC(year, month - 1, day));
 }
 
-function formatPropertiesForHubSpot(properties) {
+function getPropertyDefinitionCache(config) {
+  if (!config.propertyDefinitionCache) {
+    config.propertyDefinitionCache = new Map();
+  }
+  return config.propertyDefinitionCache;
+}
+
+async function getPropertyDefinition(name, config) {
+  const cache = getPropertyDefinitionCache(config);
+  if (cache.has(name)) {
+    return cache.get(name);
+  }
+
+  const response = await axios.get(
+    `${HUBSPOT_CONTACT_PROPERTIES_URL}/${encodeURIComponent(name)}`,
+    config
+  );
+  cache.set(name, response.data);
+  return response.data;
+}
+
+function findEnumerationOptionForDate(options, dateISO) {
+  const target = normalizeDateString(dateISO);
+
+  return options.find((option) => {
+    const candidates = [option.value, option.label].filter(Boolean);
+    return candidates.some((candidate) => normalizeDateString(candidate) === target);
+  });
+}
+
+async function formatWorkshopDateProperty(name, rawValue, config) {
+  const dateISO = normalizeDateString(rawValue);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) {
+    throw new HubSpotSyncError(`Invalid date value for ${name}: ${rawValue}`, {
+      step: 'hubspot_date_format',
+      attemptedPayload: { [name]: rawValue },
+    });
+  }
+
+  const definition = await getPropertyDefinition(name, config);
+
+  if (definition.type === 'date') {
+    return toHubSpotDateValue(dateISO);
+  }
+
+  if (definition.type === 'enumeration') {
+    const match = findEnumerationOptionForDate(definition.options || [], dateISO);
+
+    if (!match) {
+      throw new HubSpotSyncError(
+        `No HubSpot dropdown option matches ${dateISO} for ${name}`,
+        {
+          step: 'hubspot_enumeration_match',
+          attemptedPayload: {
+            [name]: dateISO,
+            availableOptions: (definition.options || []).map((option) => ({
+              label: option.label,
+              value: option.value,
+            })),
+          },
+        }
+      );
+    }
+
+    return match.value;
+  }
+
+  throw new HubSpotSyncError(
+    `Property ${name} must be a HubSpot date or dropdown field, but it is ${definition.type}`,
+    {
+      step: 'hubspot_property_type',
+      attemptedPayload: {
+        [name]: dateISO,
+        propertyType: definition.type,
+        fieldType: definition.fieldType,
+      },
+    }
+  );
+}
+
+async function formatPropertiesForHubSpot(properties, config) {
   const formatted = {};
 
   for (const [name, value] of Object.entries(properties)) {
-    if (HUBSPOT_DATE_PROPERTIES.has(name)) {
-      formatted[name] = toHubSpotDateValue(value);
+    if (WORKSHOP_DATE_PROPERTIES.has(name)) {
+      formatted[name] = await formatWorkshopDateProperty(name, value, config);
     } else {
       formatted[name] = value;
     }
@@ -60,7 +145,7 @@ function formatPropertiesForHubSpot(properties) {
   return formatted;
 }
 
-function buildHubSpotSyncError(err, step, attemptedPayload, skippedProperties = []) {
+function buildHubSpotSyncError(err, step, attemptedPayload) {
   const hubspot = err?.response?.data || null;
 
   return new HubSpotSyncError(hubspot?.message || err.message || 'HubSpot sync failed', {
@@ -69,104 +154,26 @@ function buildHubSpotSyncError(err, step, attemptedPayload, skippedProperties = 
     hubspot,
     hubspotErrors: hubspot?.errors || [],
     attemptedPayload,
-    skippedProperties,
     cause: err,
   });
 }
 
-function getInvalidPropertyNames(error) {
-  const names = new Set();
-  const haystack = JSON.stringify(error?.response?.data || {});
-
-  for (const entry of error?.response?.data?.errors || []) {
-    for (const name of entry?.context?.propertyName || []) {
-      names.add(name);
-    }
-
-    const match = entry?.message?.match(/Property "([^"]+)"/i);
-    if (match) {
-      names.add(match[1]);
-    }
-  }
-
-  const topLevelMatch = error?.response?.data?.message?.match(/Property "([^"]+)"/i);
-  if (topLevelMatch) {
-    names.add(topLevelMatch[1]);
-  }
-
-  for (const name of HUBSPOT_DATE_PROPERTIES) {
-    if (haystack.includes(name)) {
-      names.add(name);
-    }
-  }
-
-  return [...names];
-}
-
 async function syncContactProperties(properties, config, existingContactId = null) {
-  let payloadProperties = { ...properties };
-  const skippedProperties = [];
-  const dateFormatFallback = new Set();
-  let lastError = null;
-
-  while (true) {
-    try {
-      if (existingContactId) {
-        const response = await axios.patch(
-          `${HUBSPOT_CONTACTS_URL}/${existingContactId}`,
-          { properties: payloadProperties },
-          config
-        );
-        return { response, syncedProperties: payloadProperties, skippedProperties };
-      }
-
-      const response = await axios.post(
-        HUBSPOT_CONTACTS_URL,
-        { properties: payloadProperties },
-        config
-      );
-      return { response, syncedProperties: payloadProperties, skippedProperties };
-    } catch (err) {
-      lastError = err;
-      console.error('[HubSpot] Contact sync attempt failed:', JSON.stringify(err.response?.data || err.message, null, 2));
-      const invalidProperties = getInvalidPropertyNames(err);
-      let retriedDateFormat = false;
-
-      for (const name of invalidProperties) {
-        if (
-          HUBSPOT_DATE_PROPERTIES.has(name) &&
-          name in payloadProperties &&
-          !dateFormatFallback.has(name) &&
-          /^\d+$/.test(String(payloadProperties[name]))
-        ) {
-          payloadProperties[name] = normalizeDateString(payloadProperties[name]);
-          dateFormatFallback.add(name);
-          retriedDateFormat = true;
-          console.warn(`[HubSpot] Retrying ${name} with YYYY-MM-DD format`);
-        }
-      }
-
-      if (retriedDateFormat) {
-        continue;
-      }
-
-      const removable = invalidProperties.filter((name) => name in payloadProperties);
-
-      if (!removable.length) {
-        throw buildHubSpotSyncError(err, 'hubspot_contact_write', properties, skippedProperties);
-      }
-
-      for (const name of removable) {
-        skippedProperties.push(name);
-        delete payloadProperties[name];
-        console.warn(`[HubSpot] Skipping invalid property and retrying: ${name}`);
-      }
-
-      if (!Object.keys(payloadProperties).length) {
-        throw buildHubSpotSyncError(lastError, 'hubspot_contact_write', properties, skippedProperties);
-      }
-    }
+  if (existingContactId) {
+    const response = await axios.patch(
+      `${HUBSPOT_CONTACTS_URL}/${existingContactId}`,
+      { properties },
+      config
+    );
+    return { response, syncedProperties: properties };
   }
+
+  const response = await axios.post(
+    HUBSPOT_CONTACTS_URL,
+    { properties },
+    config
+  );
+  return { response, syncedProperties: properties };
 }
 
 async function findContactByEmail(email, config) {
@@ -256,7 +263,26 @@ export async function upsertHubSpotContact(properties) {
     },
   };
 
-  const payloadProperties = formatPropertiesForHubSpot(cleanProperties(properties));
+  const cleanedProperties = cleanProperties(properties);
+  let payloadProperties;
+
+  try {
+    payloadProperties = await formatPropertiesForHubSpot(cleanedProperties, config);
+  } catch (err) {
+    if (err instanceof HubSpotSyncError) {
+      throw err;
+    }
+    throw buildHubSpotSyncError(err, 'hubspot_property_format', cleanedProperties);
+  }
+
+  for (const name of REQUIRED_WORKSHOP_DATE_PROPERTIES) {
+    if (cleanedProperties[name] && !payloadProperties[name]) {
+      throw new HubSpotSyncError(`Required HubSpot property ${name} was not formatted`, {
+        step: 'hubspot_required_property',
+        attemptedPayload: cleanedProperties,
+      });
+    }
+  }
 
   let existingContact = null;
 
@@ -268,18 +294,21 @@ export async function upsertHubSpotContact(properties) {
     throw buildHubSpotSyncError(err, 'hubspot_contact_search', payloadProperties);
   }
 
-  const { response, syncedProperties, skippedProperties } = await syncContactProperties(
-    payloadProperties,
-    config,
-    existingContact?.id || null
-  );
+  try {
+    const { response, syncedProperties } = await syncContactProperties(
+      payloadProperties,
+      config,
+      existingContact?.id || null
+    );
 
-  return {
-    action: existingContact ? 'updated' : 'created',
-    contact: response.data,
-    syncedProperties,
-    skippedProperties,
-  };
+    return {
+      action: existingContact ? 'updated' : 'created',
+      contact: response.data,
+      syncedProperties,
+    };
+  } catch (err) {
+    throw buildHubSpotSyncError(err, 'hubspot_contact_write', payloadProperties);
+  }
 }
 
 export async function inspectHubSpotSetup() {
@@ -302,8 +331,8 @@ export async function inspectHubSpotSetup() {
 
   const propertyNames = [
     'class_date',
-    'choose_your_2nd_date_for_career_readiness',
-    'choose_your_3rd_date_for_career_readiness',
+    'choose_the_2nd_date_for_your_career_readiness_class_work',
+    'choose_the_3rd_date_for_your_career_readiness_class_work',
     'what_is_your_racial_and_ethnic_identity_',
   ];
 
@@ -311,15 +340,16 @@ export async function inspectHubSpotSetup() {
 
   for (const name of propertyNames) {
     try {
-      const response = await axios.get(
-        `https://api.hubapi.com/crm/v3/properties/contacts/${encodeURIComponent(name)}`,
-        config
-      );
+      const response = await getPropertyDefinition(name, config);
       properties[name] = {
         exists: true,
-        type: response.data.type,
-        fieldType: response.data.fieldType,
-        label: response.data.label,
+        type: response.type,
+        fieldType: response.fieldType,
+        label: response.label,
+        options: (response.options || []).map((option) => ({
+          label: option.label,
+          value: option.value,
+        })),
       };
     } catch (err) {
       properties[name] = {

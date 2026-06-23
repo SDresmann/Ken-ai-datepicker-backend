@@ -34,8 +34,8 @@ function normalizeDate(raw) {
 
 function getAdditionalWorkshopDates(bookingData = {}) {
     return [
-        bookingData.choose_your_2nd_date_for_career_readiness,
-        bookingData.choose_your_3rd_date_for_career_readiness,
+        bookingData.choose_the_2nd_date_for_your_career_readiness_class_work,
+        bookingData.choose_the_3rd_date_for_your_career_readiness_class_work,
     ]
         .map(normalizeDate)
         .filter(Boolean);
@@ -114,8 +114,8 @@ router.post('/hubspot-step-one', async (req, res) => {
         what_is_your_racial_and_ethnic_identity_: req.body.what_is_your_racial_and_ethnic_identity_,
         start_date: date,
         class_date: date,
-        choose_your_2nd_date_for_career_readiness: normalizeDate(req.body.choose_your_2nd_date_for_career_readiness) || '',
-        choose_your_3rd_date_for_career_readiness: normalizeDate(req.body.choose_your_3rd_date_for_career_readiness) || '',
+        choose_the_2nd_date_for_your_career_readiness_class_work: normalizeDate(req.body.choose_the_2nd_date_for_your_career_readiness_class_work) || '',
+        choose_the_3rd_date_for_your_career_readiness_class_work: normalizeDate(req.body.choose_the_3rd_date_for_your_career_readiness_class_work) || '',
     };
 
     let stepOneBooking;
@@ -137,8 +137,8 @@ router.post('/hubspot-step-one', async (req, res) => {
                     what_gender_do_you_identify_as_: req.body.what_gender_do_you_identify_as_,
                     what_is_your_racial_and_ethnic_identity_: req.body.what_is_your_racial_and_ethnic_identity_,
                     class_date: date,
-                    choose_your_2nd_date_for_career_readiness: normalizeDate(req.body.choose_your_2nd_date_for_career_readiness) || '',
-                    choose_your_3rd_date_for_career_readiness: normalizeDate(req.body.choose_your_3rd_date_for_career_readiness) || '',
+                    choose_the_2nd_date_for_your_career_readiness_class_work: normalizeDate(req.body.choose_the_2nd_date_for_your_career_readiness_class_work) || '',
+                    choose_the_3rd_date_for_your_career_readiness_class_work: normalizeDate(req.body.choose_the_3rd_date_for_your_career_readiness_class_work) || '',
                     date,
                     is_complete: false,
                 },
@@ -168,8 +168,8 @@ router.post('/hubspot-step-one', async (req, res) => {
                 phone: req.body.phone,
                 marketing_message_consent: req.body.marketing_message_consent,
                 class_date: date,
-                choose_your_2nd_date_for_career_readiness: req.body.choose_your_2nd_date_for_career_readiness || '',
-                choose_your_3rd_date_for_career_readiness: req.body.choose_your_3rd_date_for_career_readiness || '',
+                choose_the_2nd_date_for_your_career_readiness_class_work: req.body.choose_the_2nd_date_for_your_career_readiness_class_work || '',
+                choose_the_3rd_date_for_your_career_readiness_class_work: req.body.choose_the_3rd_date_for_your_career_readiness_class_work || '',
             },
             ...contact,
         });
