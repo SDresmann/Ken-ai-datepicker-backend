@@ -94,6 +94,7 @@ router.post('/hubspot-step-one', async (req, res) => {
                     last_name: req.body.last_name,
                     email: req.body.email,
                     phone: req.body.phone,
+                    marketing_message_consent: req.body.marketing_message_consent,
                     address: req.body.address,
                     city: req.body.city,
                     fullname_state: req.body.fullname_state,
@@ -133,6 +134,7 @@ router.post('/hubspot-step-one', async (req, res) => {
                 last_name: req.body.last_name,
                 email: req.body.email,
                 phone: req.body.phone,
+                marketing_message_consent: req.body.marketing_message_consent,
             },
             ...contact,
         });
