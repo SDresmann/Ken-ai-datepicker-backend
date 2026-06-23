@@ -36,6 +36,12 @@ function toHubSpotDateValue(dateISO) {
     return String(Date.UTC(year, month - 1, day));
 }
 
+function toHubSpotDateProperty(raw) {
+    const dateISO = normalizeDate(raw);
+    if (!dateISO) return '';
+    return toHubSpotDateValue(dateISO);
+}
+
 function getAdditionalWorkshopDates(bookingData = {}) {
     return [
         bookingData.choose_your_2nd_date_for_career_readiness,
@@ -122,8 +128,8 @@ router.post('/hubspot-step-one', async (req, res) => {
                     what_gender_do_you_identify_as_: req.body.what_gender_do_you_identify_as_,
                     what_is_your_racial_and_ethnic_identity_: req.body.what_is_your_racial_and_ethnic_identity_,
                     class_date: date,
-                    choose_your_2nd_date_for_career_readiness: req.body.choose_your_2nd_date_for_career_readiness || '',
-                    choose_your_3rd_date_for_career_readiness: req.body.choose_your_3rd_date_for_career_readiness || '',
+                    choose_your_2nd_date_for_career_readiness: normalizeDate(req.body.choose_your_2nd_date_for_career_readiness) || '',
+                    choose_your_3rd_date_for_career_readiness: normalizeDate(req.body.choose_your_3rd_date_for_career_readiness) || '',
                     date,
                     is_complete: false,
                 },
@@ -143,13 +149,9 @@ router.post('/hubspot-step-one', async (req, res) => {
             gender: req.body.what_gender_do_you_identify_as_,
             what_is_your_racial_and_ethnic_identity_: req.body.what_is_your_racial_and_ethnic_identity_,
             start_date: date,
-            class_date: toHubSpotDateValue(date),
-            choose_your_2nd_date_for_career_readiness: req.body.choose_your_2nd_date_for_career_readiness
-                ? toHubSpotDateValue(normalizeDate(req.body.choose_your_2nd_date_for_career_readiness))
-                : '',
-            choose_your_3rd_date_for_career_readiness: req.body.choose_your_3rd_date_for_career_readiness
-                ? toHubSpotDateValue(normalizeDate(req.body.choose_your_3rd_date_for_career_readiness))
-                : '',
+            class_date: toHubSpotDateProperty(req.body.class_date),
+            choose_your_2nd_date_for_career_readiness: toHubSpotDateProperty(req.body.choose_your_2nd_date_for_career_readiness),
+            choose_your_3rd_date_for_career_readiness: toHubSpotDateProperty(req.body.choose_your_3rd_date_for_career_readiness),
         });
 
         res.status(200).json({
@@ -161,6 +163,9 @@ router.post('/hubspot-step-one', async (req, res) => {
                 email: req.body.email,
                 phone: req.body.phone,
                 marketing_message_consent: req.body.marketing_message_consent,
+                class_date: date,
+                choose_your_2nd_date_for_career_readiness: req.body.choose_your_2nd_date_for_career_readiness || '',
+                choose_your_3rd_date_for_career_readiness: req.body.choose_your_3rd_date_for_career_readiness || '',
             },
             ...contact,
         });

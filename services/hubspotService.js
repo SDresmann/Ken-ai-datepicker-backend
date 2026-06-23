@@ -14,10 +14,25 @@ function cleanProperties(properties) {
   );
 }
 
+async function getAllContactPropertyNames(config) {
+  const propertyNames = new Set();
+  let after;
+
+  do {
+    const url = after
+      ? `${HUBSPOT_CONTACT_PROPERTIES_URL}?after=${after}`
+      : HUBSPOT_CONTACT_PROPERTIES_URL;
+    const response = await axios.get(url, config);
+    response.data.results.forEach((property) => propertyNames.add(property.name));
+    after = response.data.paging?.next?.after;
+  } while (after);
+
+  return propertyNames;
+}
+
 async function filterKnownContactProperties(properties, config) {
   try {
-    const response = await axios.get(HUBSPOT_CONTACT_PROPERTIES_URL, config);
-    const propertyNames = new Set(response.data.results.map((property) => property.name));
+    const propertyNames = await getAllContactPropertyNames(config);
     const knownProperties = Object.fromEntries(
       Object.entries(properties).filter(([name]) => propertyNames.has(name))
     );
