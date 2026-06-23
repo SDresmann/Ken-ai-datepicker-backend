@@ -36,6 +36,15 @@ function toHubSpotDateValue(dateISO) {
     return String(Date.UTC(year, month - 1, day));
 }
 
+function getAdditionalWorkshopDates(bookingData = {}) {
+    return [
+        bookingData.choose_your_2nd_date_for_career_readiness,
+        bookingData.choose_your_3rd_date_for_career_readiness,
+    ]
+        .map(normalizeDate)
+        .filter(Boolean);
+}
+
 async function bookClass(date, bookingData = {}) {
     const times = getClassTimes(date);
     if (!times) return { ok: false, reason: 'No classes on that day' };
@@ -56,14 +65,25 @@ async function bookClass(date, bookingData = {}) {
         : await Booking.create(bookingPayload);
 
     let outlookEventCreated = false;
+    let outlookEventsCreated = 0;
     try {
         await createOutlookEvent({ dateISO: date, ...times });
+        outlookEventsCreated += 1;
+
+        for (const additionalDate of getAdditionalWorkshopDates(bookingData)) {
+            const additionalTimes = getClassTimes(additionalDate);
+            if (additionalTimes) {
+                await createOutlookEvent({ dateISO: additionalDate, ...additionalTimes });
+                outlookEventsCreated += 1;
+            }
+        }
+
         outlookEventCreated = true;
     } catch (err) {
         console.error('Outlook event failed:', err.message || err);
     }
 
-    return { ok: true, booking, outlookEventCreated };
+    return { ok: true, booking, outlookEventCreated, outlookEventsCreated };
 }
 
 router.post('/', async (req, res) => {
@@ -124,6 +144,12 @@ router.post('/hubspot-step-one', async (req, res) => {
             what_is_your_racial_and_ethnic_identity_: req.body.what_is_your_racial_and_ethnic_identity_,
             start_date: date,
             class_date: toHubSpotDateValue(date),
+            choose_your_2nd_date_for_career_readiness: req.body.choose_your_2nd_date_for_career_readiness
+                ? toHubSpotDateValue(normalizeDate(req.body.choose_your_2nd_date_for_career_readiness))
+                : '',
+            choose_your_3rd_date_for_career_readiness: req.body.choose_your_3rd_date_for_career_readiness
+                ? toHubSpotDateValue(normalizeDate(req.body.choose_your_3rd_date_for_career_readiness))
+                : '',
         });
 
         res.status(200).json({
