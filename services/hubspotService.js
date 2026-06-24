@@ -160,6 +160,47 @@ function findEnumerationOptionForDate(options, dateISO) {
   });
 }
 
+function findEnumerationOptionForValue(options, rawValue) {
+  const target = String(rawValue).trim().toLowerCase();
+
+  return options.find((option) => {
+    const candidates = [option.value, option.label].filter(Boolean);
+    return candidates.some((candidate) => String(candidate).trim().toLowerCase() === target);
+  });
+}
+
+async function formatEnumerationProperty(name, rawValue, config) {
+  if (rawValue === undefined || rawValue === null || rawValue === '') {
+    return rawValue;
+  }
+
+  try {
+    const definition = await getPropertyDefinition(name, config);
+    if (definition.type !== 'enumeration') {
+      return rawValue;
+    }
+
+    if (String(rawValue).includes(';')) {
+      const mapped = String(rawValue)
+        .split(';')
+        .filter(Boolean)
+        .map((part) => {
+          const match = findEnumerationOptionForValue(definition.options || [], part);
+          return match ? match.value : part;
+        });
+      return mapped.join(';');
+    }
+
+    const match = findEnumerationOptionForValue(definition.options || [], rawValue);
+    return match ? match.value : rawValue;
+  } catch (err) {
+    if (err.response?.status === 404) {
+      return rawValue;
+    }
+    throw err;
+  }
+}
+
 async function formatWorkshopDateProperty(name, rawValue, config) {
   const dateISO = normalizeDateString(rawValue);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) {
@@ -196,7 +237,7 @@ async function formatPropertiesForHubSpot(properties, config) {
     if (HUBSPOT_DATE_PROPERTIES.has(name)) {
       formatted[name] = await formatWorkshopDateProperty(name, value, config);
     } else {
-      formatted[name] = value;
+      formatted[name] = await formatEnumerationProperty(name, value, config);
     }
   }
 
@@ -391,6 +432,7 @@ export async function inspectHubSpotSetup() {
     'which_career_readiness_date_are_you_interested_in_attending_work',
     'choose_the_2nd_date_for_your_career_readiness_class_work',
     'choose_the_3rd_date_for_your_career_readiness_class_work',
+    'are_you_under_18_years_old',
     'what_is_your_racial_and_ethnic_identity_',
   ];
 

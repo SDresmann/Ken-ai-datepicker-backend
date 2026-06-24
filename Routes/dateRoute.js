@@ -5,7 +5,6 @@ import { upsertHubSpotContact, inspectHubSpotSetup, buildHubSpotContactPropertie
 import { HubSpotSyncError, logHubSpotFailure } from '../services/hubspotErrors.js';
 const router = express.Router();
 
-// Tue-Thu 6-7pm, Fri 2-5pm
 function getClassTimes(dateISO) {
     const day = new Date(`${dateISO}T12:00:00`).getDay(); // 0=Sun ... 6=Sat
     if (day >= 2 && day <= 4) return { startTime: '18:00', endTime: '19:00' };
@@ -16,8 +15,7 @@ function getClassTimes(dateISO) {
 function normalizeDate(raw) {
     if (!raw) return null;
 
-    // Normalize whatever the frontend/HubSpot sends to YYYY-MM-DD:
-    // epoch milliseconds, MM/DD/YYYY (or MM-DD-YYYY), ISO date, or Date object
+
     const s = raw instanceof Date ? raw.toISOString() : String(raw).trim();
     const usFormat = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
 
@@ -116,6 +114,50 @@ router.post('/', async (req, res) => {
     }
 });
 
+function buildBookingUpdate(body, date) {
+    return {
+        first_name: body.first_name,
+        last_name: body.last_name,
+        email: body.email,
+        phone: body.phone,
+        marketing_message_consent: body.marketing_message_consent,
+        address: body.address,
+        city: body.city,
+        fullname_state: body.fullname_state,
+        zip: body.zip,
+        are_you_under_18_years_old: body.are_you_under_18_years_old,
+        date_of_birth: normalizeDate(body.date_of_birth) || '',
+        what_gender_do_you_identify_as_: body.what_gender_do_you_identify_as_,
+        what_is_your_racial_and_ethnic_identity_: body.what_is_your_racial_and_ethnic_identity_,
+        which_career_readiness_date_are_you_interested_in_attending_work: date,
+        choose_the_2nd_date_for_your_career_readiness_class_work: normalizeDate(body.choose_the_2nd_date_for_your_career_readiness_class_work) || '',
+        choose_the_3rd_date_for_your_career_readiness_class_work: normalizeDate(body.choose_the_3rd_date_for_your_career_readiness_class_work) || '',
+        are_you_still_finishing_high_school: body.are_you_still_finishing_high_school,
+        whats_the_full_name_of_your_school: body.whats_the_full_name_of_your_school,
+        what_grade_are_you_currently_in: body.what_grade_are_you_currently_in,
+        highest_level_of_education_: body.highest_level_of_education_,
+        i_or_a_family_member_i_live_with_receive_the_following_type_of_public_assistancecheck_all_that_apply:
+            body.i_or_a_family_member_i_live_with_receive_the_following_type_of_public_assistancecheck_all_that_apply,
+        please_check_all_of_these_situations_that_apply_to_you: body.please_check_all_of_these_situations_that_apply_to_you,
+        are_you_a_parent: body.are_you_a_parent,
+        how_many_children_do_you_have: body.how_many_children_do_you_have,
+        are_you_a_single_parent: body.are_you_a_single_parent,
+        are_you_involved_in_the_justice_system: body.are_you_involved_in_the_justice_system,
+        what_is_your_status_in_the_justice_system_check_all_that_apply: body.what_is_your_status_in_the_justice_system_check_all_that_apply,
+        what_is_your_offense_status_check_all_that_apply: body.what_is_your_offense_status_check_all_that_apply,
+        what_is_your_system_level_check_all_that_apply: body.what_is_your_system_level_check_all_that_apply,
+        do_you_grant_permission_for_your_data_as_it_relates_to_this_program_to_be_collected_and_tracked:
+            body.do_you_grant_permission_for_your_data_as_it_relates_to_this_program_to_be_collected_and_tracked,
+        i_consent_to_the_irrevocable_right_to_use_my_name__or_a_fictional_name___statement_s__story__photog:
+            body.i_consent_to_the_irrevocable_right_to_use_my_name__or_a_fictional_name___statement_s__story__photog,
+        digital_signature: body.digital_signature,
+        date_signed: normalizeDate(body.date_signed) || '',
+        whats_your_employment_status_pick_only_1: body.whats_your_employment_status_pick_only_1,
+        date,
+        is_complete: false,
+    };
+}
+
 router.post('/hubspot-step-one', async (req, res) => {
     const date = getPrimaryWorkshopDate(req.body);
 
@@ -145,26 +187,7 @@ router.post('/hubspot-step-one', async (req, res) => {
     try {
         stepOneBooking = await Booking.findOneAndUpdate(
             { email: req.body.email, which_career_readiness_date_are_you_interested_in_attending_work: date },
-            {
-                $set: {
-                    first_name: req.body.first_name,
-                    last_name: req.body.last_name,
-                    email: req.body.email,
-                    phone: req.body.phone,
-                    marketing_message_consent: req.body.marketing_message_consent,
-                    address: req.body.address,
-                    city: req.body.city,
-                    fullname_state: req.body.fullname_state,
-                    zip: req.body.zip,
-                    what_gender_do_you_identify_as_: req.body.what_gender_do_you_identify_as_,
-                    what_is_your_racial_and_ethnic_identity_: req.body.what_is_your_racial_and_ethnic_identity_,
-                    which_career_readiness_date_are_you_interested_in_attending_work: date,
-                    choose_the_2nd_date_for_your_career_readiness_class_work: normalizeDate(req.body.choose_the_2nd_date_for_your_career_readiness_class_work) || '',
-                    choose_the_3rd_date_for_your_career_readiness_class_work: normalizeDate(req.body.choose_the_3rd_date_for_your_career_readiness_class_work) || '',
-                    date,
-                    is_complete: false,
-                },
-            },
+            { $set: buildBookingUpdate(req.body, date) },
             { new: true, upsert: true }
         );
     } catch (err) {
