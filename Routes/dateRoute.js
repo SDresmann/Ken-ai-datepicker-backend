@@ -1,7 +1,7 @@
 import express from 'express';
 import Booking from '../Modules/bookingModels.js';
 import { createOutlookEvent } from '../services/outlookServices.js';
-import { upsertHubSpotContact, inspectHubSpotSetup } from '../services/hubspotService.js';
+import { upsertHubSpotContact, inspectHubSpotSetup, buildHubSpotContactPropertiesFromBooking } from '../services/hubspotService.js';
 import { HubSpotSyncError, logHubSpotFailure } from '../services/hubspotErrors.js';
 const router = express.Router();
 
@@ -87,7 +87,21 @@ async function bookClass(date, bookingData = {}) {
         console.error('Outlook event failed:', err.message || err);
     }
 
-    return { ok: true, booking, outlookEventCreated, outlookEventsCreated };
+    let hubspot = null;
+    let hubspotError = null;
+
+    if (bookingData.email) {
+        try {
+            hubspot = await upsertHubSpotContact(buildHubSpotContactPropertiesFromBooking(bookingPayload));
+        } catch (err) {
+            hubspotError = err instanceof HubSpotSyncError
+                ? err.message
+                : err.message || 'HubSpot sync failed';
+            console.error('HubSpot full form sync failed:', hubspotError);
+        }
+    }
+
+    return { ok: true, booking, outlookEventCreated, outlookEventsCreated, hubspot, hubspotError };
 }
 
 router.post('/', async (req, res) => {
@@ -120,22 +134,11 @@ router.post('/hubspot-step-one', async (req, res) => {
         });
     }
 
-    const hubspotInput = {
-        firstname: req.body.first_name,
-        lastname: req.body.last_name,
-        email: req.body.email,
-        phone: req.body.phone,
-        address: req.body.address,
-        city: req.body.city,
-        state: req.body.fullname_state,
-        zip: req.body.zip,
-        gender: req.body.what_gender_do_you_identify_as_,
-        what_is_your_racial_and_ethnic_identity_: req.body.what_is_your_racial_and_ethnic_identity_,
-        start_date: date,
+    const hubspotInput = buildHubSpotContactPropertiesFromBooking({
+        ...req.body,
         which_career_readiness_date_are_you_interested_in_attending_work: date,
-        choose_the_2nd_date_for_your_career_readiness_class_work: normalizeDate(req.body.choose_the_2nd_date_for_your_career_readiness_class_work) || '',
-        choose_the_3rd_date_for_your_career_readiness_class_work: normalizeDate(req.body.choose_the_3rd_date_for_your_career_readiness_class_work) || '',
-    };
+        class_date: date,
+    });
 
     let stepOneBooking;
 

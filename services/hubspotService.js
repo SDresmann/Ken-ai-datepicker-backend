@@ -5,16 +5,95 @@ const HUBSPOT_CONTACTS_URL = 'https://api.hubapi.com/crm/v3/objects/contacts';
 const HUBSPOT_CONTACT_SEARCH_URL = 'https://api.hubapi.com/crm/v3/objects/contacts/search';
 const HUBSPOT_CONTACT_PROPERTIES_URL = 'https://api.hubapi.com/crm/v3/properties/contacts';
 
-const WORKSHOP_DATE_PROPERTIES = new Set([
+const HUBSPOT_DATE_PROPERTIES = new Set([
   'which_career_readiness_date_are_you_interested_in_attending_work',
   'choose_the_2nd_date_for_your_career_readiness_class_work',
   'choose_the_3rd_date_for_your_career_readiness_class_work',
+  'date_of_birth',
+  'date_signed',
+  'class_date',
 ]);
 
 const REQUIRED_WORKSHOP_DATE_PROPERTIES = new Set([
   'choose_the_2nd_date_for_your_career_readiness_class_work',
   'choose_the_3rd_date_for_your_career_readiness_class_work',
 ]);
+
+function formatMultiSelect(value) {
+  if (!value) return '';
+  if (Array.isArray(value)) {
+    return value.filter(Boolean).join(';');
+  }
+  return String(value);
+}
+
+function formatBoolean(value) {
+  if (value === undefined || value === null || value === '') return '';
+  return value ? 'true' : 'false';
+}
+
+export function buildHubSpotContactPropertiesFromBooking(data = {}) {
+  const workshopDate = normalizeDateString(
+    data.which_career_readiness_date_are_you_interested_in_attending_work ??
+    data.class_date ??
+    data.date
+  );
+
+  return {
+    email: data.email,
+    firstname: data.first_name,
+    lastname: data.last_name,
+    phone: data.phone,
+    address: data.address,
+    city: data.city,
+    state: data.fullname_state,
+    zip: data.zip,
+    gender: data.what_gender_do_you_identify_as_,
+    what_is_your_racial_and_ethnic_identity_: data.what_is_your_racial_and_ethnic_identity_,
+    are_you_under_18_years_old: data.are_you_under_18_years_old,
+    date_of_birth: data.date_of_birth ? normalizeDateString(data.date_of_birth) : '',
+    are_you_still_finishing_high_school: data.are_you_still_finishing_high_school,
+    whats_the_full_name_of_your_school: data.whats_the_full_name_of_your_school,
+    what_grade_are_you_currently_in: data.what_grade_are_you_currently_in,
+    highest_level_of_education_: data.highest_level_of_education_,
+    i_or_a_family_member_i_live_with_receive_the_following_type_of_public_assistancecheck_all_that_apply: formatMultiSelect(
+      data.i_or_a_family_member_i_live_with_receive_the_following_type_of_public_assistancecheck_all_that_apply
+    ),
+    please_check_all_of_these_situations_that_apply_to_you: formatMultiSelect(
+      data.please_check_all_of_these_situations_that_apply_to_you
+    ),
+    are_you_a_parent: data.are_you_a_parent,
+    how_many_children_do_you_have: data.how_many_children_do_you_have,
+    are_you_a_single_parent: data.are_you_a_single_parent,
+    are_you_involved_in_the_justice_system: data.are_you_involved_in_the_justice_system,
+    what_is_your_status_in_the_justice_system_check_all_that_apply: formatMultiSelect(
+      data.what_is_your_status_in_the_justice_system_check_all_that_apply
+    ),
+    what_is_your_offense_status_check_all_that_apply: formatMultiSelect(
+      data.what_is_your_offense_status_check_all_that_apply
+    ),
+    what_is_your_system_level_check_all_that_apply: formatMultiSelect(
+      data.what_is_your_system_level_check_all_that_apply
+    ),
+    do_you_grant_permission_for_your_data_as_it_relates_to_this_program_to_be_collected_and_tracked:
+      data.do_you_grant_permission_for_your_data_as_it_relates_to_this_program_to_be_collected_and_tracked,
+    i_consent_to_the_irrevocable_right_to_use_my_name__or_a_fictional_name___statement_s__story__photog: formatBoolean(
+      data.i_consent_to_the_irrevocable_right_to_use_my_name__or_a_fictional_name___statement_s__story__photog
+    ),
+    digital_signature: data.digital_signature,
+    date_signed: data.date_signed ? normalizeDateString(data.date_signed) : '',
+    whats_your_employment_status_pick_only_1: data.whats_your_employment_status_pick_only_1,
+    start_date: workshopDate || '',
+    which_career_readiness_date_are_you_interested_in_attending_work: workshopDate || '',
+    class_date: workshopDate || '',
+    choose_the_2nd_date_for_your_career_readiness_class_work: data.choose_the_2nd_date_for_your_career_readiness_class_work
+      ? normalizeDateString(data.choose_the_2nd_date_for_your_career_readiness_class_work)
+      : '',
+    choose_the_3rd_date_for_your_career_readiness_class_work: data.choose_the_3rd_date_for_your_career_readiness_class_work
+      ? normalizeDateString(data.choose_the_3rd_date_for_your_career_readiness_class_work)
+      : '',
+  };
+}
 
 function getAccessToken() {
   return process.env.HUBSPOT_ACCESS_TOKEN || process.env.ACCESS_TOKEN;
@@ -84,58 +163,37 @@ function findEnumerationOptionForDate(options, dateISO) {
 async function formatWorkshopDateProperty(name, rawValue, config) {
   const dateISO = normalizeDateString(rawValue);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) {
-    throw new HubSpotSyncError(`Invalid date value for ${name}: ${rawValue}`, {
-      step: 'hubspot_date_format',
-      attemptedPayload: { [name]: rawValue },
-    });
+    return rawValue;
   }
 
-  const definition = await getPropertyDefinition(name, config);
+  try {
+    const definition = await getPropertyDefinition(name, config);
 
-  if (definition.type === 'date') {
-    return toHubSpotDateValue(dateISO);
-  }
-
-  if (definition.type === 'enumeration') {
-    const match = findEnumerationOptionForDate(definition.options || [], dateISO);
-
-    if (!match) {
-      throw new HubSpotSyncError(
-        `No HubSpot dropdown option matches ${dateISO} for ${name}`,
-        {
-          step: 'hubspot_enumeration_match',
-          attemptedPayload: {
-            [name]: dateISO,
-            availableOptions: (definition.options || []).map((option) => ({
-              label: option.label,
-              value: option.value,
-            })),
-          },
-        }
-      );
+    if (definition.type === 'date') {
+      return toHubSpotDateValue(dateISO);
     }
 
-    return match.value;
-  }
-
-  throw new HubSpotSyncError(
-    `Property ${name} must be a HubSpot date or dropdown field, but it is ${definition.type}`,
-    {
-      step: 'hubspot_property_type',
-      attemptedPayload: {
-        [name]: dateISO,
-        propertyType: definition.type,
-        fieldType: definition.fieldType,
-      },
+    if (definition.type === 'enumeration') {
+      const match = findEnumerationOptionForDate(definition.options || [], dateISO);
+      if (match) {
+        return match.value;
+      }
     }
-  );
+
+    return dateISO;
+  } catch (err) {
+    if (err.response?.status === 404) {
+      return toHubSpotDateValue(dateISO);
+    }
+    throw err;
+  }
 }
 
 async function formatPropertiesForHubSpot(properties, config) {
   const formatted = {};
 
   for (const [name, value] of Object.entries(properties)) {
-    if (WORKSHOP_DATE_PROPERTIES.has(name)) {
+    if (HUBSPOT_DATE_PROPERTIES.has(name)) {
       formatted[name] = await formatWorkshopDateProperty(name, value, config);
     } else {
       formatted[name] = value;
