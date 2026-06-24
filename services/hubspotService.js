@@ -6,7 +6,7 @@ const HUBSPOT_CONTACT_SEARCH_URL = 'https://api.hubapi.com/crm/v3/objects/contac
 const HUBSPOT_CONTACT_PROPERTIES_URL = 'https://api.hubapi.com/crm/v3/properties/contacts';
 
 const WORKSHOP_DATE_PROPERTIES = new Set([
-  'class_date',
+  'which_career_readiness_date_are_you_interested_in_attending_work',
   'choose_the_2nd_date_for_your_career_readiness_class_work',
   'choose_the_3rd_date_for_your_career_readiness_class_work',
 ]);
@@ -330,7 +330,7 @@ export async function inspectHubSpotSetup() {
   };
 
   const propertyNames = [
-    'class_date',
+    'which_career_readiness_date_are_you_interested_in_attending_work',
     'choose_the_2nd_date_for_your_career_readiness_class_work',
     'choose_the_3rd_date_for_your_career_readiness_class_work',
     'what_is_your_racial_and_ethnic_identity_',

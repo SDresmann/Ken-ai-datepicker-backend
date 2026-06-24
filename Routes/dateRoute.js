@@ -32,6 +32,14 @@ function normalizeDate(raw) {
     return s.slice(0, 10);
 }
 
+function getPrimaryWorkshopDate(rawBody = {}) {
+    return normalizeDate(
+        rawBody.which_career_readiness_date_are_you_interested_in_attending_work ??
+        rawBody.class_date ??
+        rawBody.date
+    );
+}
+
 function getAdditionalWorkshopDates(bookingData = {}) {
     return [
         bookingData.choose_the_2nd_date_for_your_career_readiness_class_work,
@@ -45,16 +53,16 @@ async function bookClass(date, bookingData = {}) {
     const times = getClassTimes(date);
     if (!times) return { ok: false, reason: 'No classes on that day' };
 
-    const classDate = bookingData.class_date || date;
+    const classDate = bookingData.which_career_readiness_date_are_you_interested_in_attending_work || date;
     const bookingPayload = {
         ...bookingData,
         date,
-        class_date: classDate,
+        which_career_readiness_date_are_you_interested_in_attending_work: classDate,
         is_complete: true,
     };
     const booking = bookingData.email
         ? await Booking.findOneAndUpdate(
-            { email: bookingData.email, class_date: classDate },
+            { email: bookingData.email, which_career_readiness_date_are_you_interested_in_attending_work: classDate },
             { $set: bookingPayload },
             { new: true, upsert: true }
         )
@@ -84,7 +92,7 @@ async function bookClass(date, bookingData = {}) {
 
 router.post('/', async (req, res) => {
     try {
-        const date = normalizeDate(req.body.class_date ?? req.body.date);
+        const date = getPrimaryWorkshopDate(req.body);
         const result = await bookClass(date, req.body);
         if (!result.ok) return res.status(400).json({ message: result.reason });
         res.status(201).json(result);
@@ -95,10 +103,21 @@ router.post('/', async (req, res) => {
 });
 
 router.post('/hubspot-step-one', async (req, res) => {
-    const date = normalizeDate(req.body.class_date);
+    const date = getPrimaryWorkshopDate(req.body);
 
     if (!req.body.email || !date) {
-        return res.status(400).json({ message: 'Email and class date are required' });
+        return res.status(400).json({
+            message: 'Email and workshop date are required',
+            detail: !req.body.email
+                ? 'Email is missing from the request.'
+                : 'Workshop date is missing or invalid. Expected which_career_readiness_date_are_you_interested_in_attending_work.',
+            received: {
+                email: req.body.email || '',
+                which_career_readiness_date_are_you_interested_in_attending_work:
+                    req.body.which_career_readiness_date_are_you_interested_in_attending_work || '',
+                class_date: req.body.class_date || '',
+            },
+        });
     }
 
     const hubspotInput = {
@@ -113,7 +132,7 @@ router.post('/hubspot-step-one', async (req, res) => {
         gender: req.body.what_gender_do_you_identify_as_,
         what_is_your_racial_and_ethnic_identity_: req.body.what_is_your_racial_and_ethnic_identity_,
         start_date: date,
-        class_date: date,
+        which_career_readiness_date_are_you_interested_in_attending_work: date,
         choose_the_2nd_date_for_your_career_readiness_class_work: normalizeDate(req.body.choose_the_2nd_date_for_your_career_readiness_class_work) || '',
         choose_the_3rd_date_for_your_career_readiness_class_work: normalizeDate(req.body.choose_the_3rd_date_for_your_career_readiness_class_work) || '',
     };
@@ -122,7 +141,7 @@ router.post('/hubspot-step-one', async (req, res) => {
 
     try {
         stepOneBooking = await Booking.findOneAndUpdate(
-            { email: req.body.email, class_date: date },
+            { email: req.body.email, which_career_readiness_date_are_you_interested_in_attending_work: date },
             {
                 $set: {
                     first_name: req.body.first_name,
@@ -136,7 +155,7 @@ router.post('/hubspot-step-one', async (req, res) => {
                     zip: req.body.zip,
                     what_gender_do_you_identify_as_: req.body.what_gender_do_you_identify_as_,
                     what_is_your_racial_and_ethnic_identity_: req.body.what_is_your_racial_and_ethnic_identity_,
-                    class_date: date,
+                    which_career_readiness_date_are_you_interested_in_attending_work: date,
                     choose_the_2nd_date_for_your_career_readiness_class_work: normalizeDate(req.body.choose_the_2nd_date_for_your_career_readiness_class_work) || '',
                     choose_the_3rd_date_for_your_career_readiness_class_work: normalizeDate(req.body.choose_the_3rd_date_for_your_career_readiness_class_work) || '',
                     date,
@@ -167,7 +186,7 @@ router.post('/hubspot-step-one', async (req, res) => {
                 email: req.body.email,
                 phone: req.body.phone,
                 marketing_message_consent: req.body.marketing_message_consent,
-                class_date: date,
+                which_career_readiness_date_are_you_interested_in_attending_work: date,
                 choose_the_2nd_date_for_your_career_readiness_class_work: req.body.choose_the_2nd_date_for_your_career_readiness_class_work || '',
                 choose_the_3rd_date_for_your_career_readiness_class_work: req.body.choose_the_3rd_date_for_your_career_readiness_class_work || '',
             },
@@ -210,18 +229,21 @@ router.post('/hubspot-webhook', async (req, res) => {
         console.log('HubSpot webhook payload:', JSON.stringify(req.body));
 
         const raw =
+            req.body?.properties?.which_career_readiness_date_are_you_interested_in_attending_work?.value ??
+            req.body?.properties?.which_career_readiness_date_are_you_interested_in_attending_work ??
+            req.body?.which_career_readiness_date_are_you_interested_in_attending_work ??
             req.body?.properties?.class_date?.value ??
             req.body?.properties?.class_date ??
             req.body?.class_date;
 
         if (!raw) {
-            console.error('No class_date found in webhook payload');
-            return res.status(400).json({ message: 'No class_date in payload' });
+            console.error('No which_career_readiness_date_are_you_interested_in_attending_work found in webhook payload');
+            return res.status(400).json({ message: 'No which_career_readiness_date_are_you_interested_in_attending_work in payload' });
         }
 
         const date = normalizeDate(raw);
 
-        const result = await bookClass(date, { class_date: date });
+        const result = await bookClass(date, { which_career_readiness_date_are_you_interested_in_attending_work: date });
         if (!result.ok) {
             console.error(`Webhook booking rejected for ${date}: ${result.reason}`);
             return res.status(400).json({ message: result.reason });

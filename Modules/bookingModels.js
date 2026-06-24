@@ -18,7 +18,7 @@ const bookingSchema = new mongoose.Schema({
     date_of_birth: String,
     what_gender_do_you_identify_as_: String,
     what_is_your_racial_and_ethnic_identity_: String,
-    class_date: String,
+    which_career_readiness_date_are_you_interested_in_attending_work: String,
     choose_the_2nd_date_for_your_career_readiness_class_work: String,
     choose_the_3rd_date_for_your_career_readiness_class_work: String,
     are_you_still_finishing_high_school: String,
