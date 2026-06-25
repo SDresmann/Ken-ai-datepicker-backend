@@ -39,6 +39,7 @@ const bookingSchema = new mongoose.Schema({
     digital_signature: String,
     date_signed: String,
     whats_your_employment_status_pick_only_1: String,
+    career_readiness_form_status: String,
     is_complete: {
         type: Boolean,
         default: false,

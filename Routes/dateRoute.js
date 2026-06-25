@@ -56,6 +56,7 @@ async function bookClass(date, bookingData = {}) {
         ...bookingData,
         date,
         which_career_readiness_date_are_you_interested_in_attending_work: classDate,
+        career_readiness_form_status: bookingData.career_readiness_form_status || 'Complete',
         is_complete: true,
     };
     const booking = bookingData.email
@@ -153,6 +154,7 @@ function buildBookingUpdate(body, date) {
         digital_signature: body.digital_signature,
         date_signed: normalizeDate(body.date_signed) || '',
         whats_your_employment_status_pick_only_1: body.whats_your_employment_status_pick_only_1,
+        career_readiness_form_status: body.career_readiness_form_status || 'Partial',
         date,
         is_complete: false,
     };
@@ -180,6 +182,7 @@ router.post('/hubspot-step-one', async (req, res) => {
         ...req.body,
         which_career_readiness_date_are_you_interested_in_attending_work: date,
         class_date: date,
+        career_readiness_form_status: req.body.career_readiness_form_status || 'Partial',
     });
 
     let stepOneBooking;
