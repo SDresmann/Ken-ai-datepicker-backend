@@ -83,7 +83,7 @@ export function buildHubSpotContactPropertiesFromBooking(data = {}) {
     digital_signature: data.digital_signature,
     date_signed: data.date_signed ? normalizeDateString(data.date_signed) : '',
     whats_your_employment_status_pick_only_1: data.whats_your_employment_status_pick_only_1,
-    start_date: workshopDate || '',
+    start_date_desired: workshopDate || '',
     which_career_readiness_date_are_you_interested_in_attending_work: workshopDate || '',
     class_date: workshopDate || '',
     choose_the_2nd_date_for_your_career_readiness_class_work: data.choose_the_2nd_date_for_your_career_readiness_class_work
