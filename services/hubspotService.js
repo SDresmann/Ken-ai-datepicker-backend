@@ -48,7 +48,7 @@ export function buildHubSpotContactPropertiesFromBooking(data = {}) {
     city: data.city,
     state: data.fullname_state,
     zip: data.zip,
-    gender: data.what_gender_do_you_identify_as_,
+    what_gender_do_you_identify_as_: data.what_gender_do_you_identify_as_,
     what_is_your_racial_and_ethnic_identity_: data.what_is_your_racial_and_ethnic_identity_,
     are_you_under_18_years_old: data.are_you_under_18_years_old,
     date_of_birth: data.date_of_birth ? normalizeDateString(data.date_of_birth) : '',
@@ -141,15 +141,87 @@ function getPropertyDefinitionCache(config) {
 async function getPropertyDefinition(name, config) {
   const cache = getPropertyDefinitionCache(config);
   if (cache.has(name)) {
-    return cache.get(name);
+    const cached = cache.get(name);
+    if (cached === null) {
+      const err = new Error(`Property ${name} does not exist`);
+      err.response = { status: 404 };
+      throw err;
+    }
+    return cached;
   }
 
-  const response = await axios.get(
-    `${HUBSPOT_CONTACT_PROPERTIES_URL}/${encodeURIComponent(name)}`,
-    config
-  );
-  cache.set(name, response.data);
-  return response.data;
+  try {
+    const response = await axios.get(
+      `${HUBSPOT_CONTACT_PROPERTIES_URL}/${encodeURIComponent(name)}`,
+      config
+    );
+    cache.set(name, response.data);
+    return response.data;
+  } catch (err) {
+    if (err.response?.status === 404) {
+      cache.set(name, null);
+    }
+    throw err;
+  }
+}
+
+async function ensureCareerReadinessFormStatusProperty(config) {
+  const name = 'career_readiness_form_status';
+
+  try {
+    await getPropertyDefinition(name, config);
+    return;
+  } catch (err) {
+    if (err.response?.status !== 404) {
+      throw err;
+    }
+  }
+
+  try {
+    const response = await axios.post(
+      HUBSPOT_CONTACT_PROPERTIES_URL,
+      {
+        name,
+        label: 'Career Readiness Form Status',
+        type: 'enumeration',
+        fieldType: 'select',
+        groupName: 'contactinformation',
+        options: [
+          { label: 'Partial', value: 'Partial', displayOrder: 0, hidden: false },
+          { label: 'Complete', value: 'Complete', displayOrder: 1, hidden: false },
+        ],
+      },
+      config
+    );
+    getPropertyDefinitionCache(config).set(name, response.data);
+    console.log('Created HubSpot property career_readiness_form_status');
+  } catch (err) {
+    console.warn(
+      'Could not auto-create career_readiness_form_status:',
+      err.response?.data?.message || err.message
+    );
+  }
+}
+
+async function filterExistingProperties(properties, config) {
+  const filtered = {};
+  const skippedProperties = [];
+
+  for (const [name, value] of Object.entries(properties)) {
+    try {
+      await getPropertyDefinition(name, config);
+      filtered[name] = value;
+    } catch (err) {
+      if (err.response?.status === 404) {
+        skippedProperties.push(name);
+        console.warn(`Skipping HubSpot property that does not exist: ${name}`);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  return { filtered, skippedProperties };
 }
 
 function findEnumerationOptionForDate(options, dateISO) {
@@ -245,7 +317,7 @@ async function formatPropertiesForHubSpot(properties, config) {
   return formatted;
 }
 
-function buildHubSpotSyncError(err, step, attemptedPayload) {
+function buildHubSpotSyncError(err, step, attemptedPayload, skippedProperties = []) {
   const hubspot = err?.response?.data || null;
 
   return new HubSpotSyncError(hubspot?.message || err.message || 'HubSpot sync failed', {
@@ -254,6 +326,7 @@ function buildHubSpotSyncError(err, step, attemptedPayload) {
     hubspot,
     hubspotErrors: hubspot?.errors || [],
     attemptedPayload,
+    skippedProperties,
     cause: err,
   });
 }
@@ -367,12 +440,31 @@ export async function upsertHubSpotContact(properties) {
   let payloadProperties;
 
   try {
+    await ensureCareerReadinessFormStatusProperty(config);
     payloadProperties = await formatPropertiesForHubSpot(cleanedProperties, config);
   } catch (err) {
     if (err instanceof HubSpotSyncError) {
       throw err;
     }
     throw buildHubSpotSyncError(err, 'hubspot_property_format', cleanedProperties);
+  }
+
+  let skippedProperties = [];
+
+  try {
+    const filtered = await filterExistingProperties(payloadProperties, config);
+    payloadProperties = filtered.filtered;
+    skippedProperties = filtered.skippedProperties;
+  } catch (err) {
+    throw buildHubSpotSyncError(err, 'hubspot_property_filter', payloadProperties);
+  }
+
+  if (!Object.keys(payloadProperties).length) {
+    throw new HubSpotSyncError('No valid HubSpot properties remain after filtering', {
+      step: 'hubspot_property_filter',
+      attemptedPayload: cleanedProperties,
+      skippedProperties,
+    });
   }
 
   for (const name of REQUIRED_WORKSHOP_DATE_PROPERTIES) {
@@ -405,9 +497,10 @@ export async function upsertHubSpotContact(properties) {
       action: existingContact ? 'updated' : 'created',
       contact: response.data,
       syncedProperties,
+      skippedProperties,
     };
   } catch (err) {
-    throw buildHubSpotSyncError(err, 'hubspot_contact_write', payloadProperties);
+    throw buildHubSpotSyncError(err, 'hubspot_contact_write', payloadProperties, skippedProperties);
   }
 }
 
