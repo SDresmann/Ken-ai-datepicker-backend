@@ -1,6 +1,7 @@
 import express from 'express';
 import Booking from '../Modules/bookingModels.js';
 import { createOutlookEvent } from '../services/outlookServices.js';
+import { sendClassSignupNotifications } from '../services/emailService.js';
 import { upsertHubSpotContact, inspectHubSpotSetup, buildHubSpotContactPropertiesFromBooking } from '../services/hubspotService.js';
 import { HubSpotSyncError, logHubSpotFailure } from '../services/hubspotErrors.js';
 const router = express.Router();
@@ -88,6 +89,9 @@ async function bookClass(date, bookingData = {}) {
 
     let hubspot = null;
     let hubspotError = null;
+    let signupEmailsSent = 0;
+    let signupEmailRecipients = [];
+    let signupEmailError = null;
 
     if (bookingData.email) {
         try {
@@ -100,7 +104,26 @@ async function bookClass(date, bookingData = {}) {
         }
     }
 
-    return { ok: true, booking, outlookEventCreated, outlookEventsCreated, hubspot, hubspotError };
+    try {
+        const emailResult = await sendClassSignupNotifications(bookingPayload);
+        signupEmailsSent = emailResult.sent;
+        signupEmailRecipients = emailResult.recipients;
+    } catch (err) {
+        signupEmailError = err.message || 'Signup notification email failed';
+        console.error('Class signup notification email failed:', signupEmailError);
+    }
+
+    return {
+        ok: true,
+        booking,
+        outlookEventCreated,
+        outlookEventsCreated,
+        hubspot,
+        hubspotError,
+        signupEmailsSent,
+        signupEmailRecipients,
+        signupEmailError,
+    };
 }
 
 router.post('/', async (req, res) => {

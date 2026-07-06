@@ -4,8 +4,22 @@ import { Client } from '@microsoft/microsoft-graph-client';
 
 let cca;
 
-async function getGraphClient() {
-  // Created lazily so dotenv.config() has run before we read process.env
+function parseOutlookUserEmails() {
+  return (process.env.MS_OUTLOOK_USER_EMAIL || '')
+    .split(',')
+    .map((email) => email.trim())
+    .filter(Boolean);
+}
+
+export function getOutlookSenderEmail() {
+  return parseOutlookUserEmails()[0] || '';
+}
+
+export function getSignupNotificationRecipients() {
+  return parseOutlookUserEmails().slice(1);
+}
+
+export async function getGraphClient() {
   if (!cca) {
     cca = new ConfidentialClientApplication({
       auth: {
@@ -23,10 +37,15 @@ async function getGraphClient() {
 }
 
 export async function createOutlookEvent({ dateISO, startTime, endTime }) {
+  const sender = getOutlookSenderEmail();
+  if (!sender) {
+    throw new Error('MS_OUTLOOK_USER_EMAIL is not configured');
+  }
+
   const client = await getGraphClient();
 
   return client
-    .api(`/users/${encodeURIComponent(process.env.MS_OUTLOOK_USER_EMAIL)}/events`)
+    .api(`/users/${encodeURIComponent(sender)}/events`)
     .post({
       subject: 'AI Class Booking',
       start: { dateTime: `${dateISO}T${startTime}:00`, timeZone: 'America/New_York' },
