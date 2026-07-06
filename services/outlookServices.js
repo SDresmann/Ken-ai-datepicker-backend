@@ -3,6 +3,8 @@ import { ConfidentialClientApplication } from '@azure/msal-node';
 import { Client } from '@microsoft/microsoft-graph-client';
 
 let cca;
+const CLASS_EVENT_SUBJECT = 'Ready.Set.Hire. Class';
+const CLASS_ZOOM_LINK = 'https://us06web.zoom.us/j/5494309343?pwd=OXc5MkRvODhFQTV1RzJ5SkFUNlo5dz09';
 
 function parseOutlookUserEmails() {
   return (process.env.MS_OUTLOOK_USER_EMAIL || '')
@@ -38,17 +40,36 @@ export async function getGraphClient() {
 
 export async function createOutlookEvent({ dateISO, startTime, endTime }) {
   const sender = getOutlookSenderEmail();
+  const attendees = getSignupNotificationRecipients();
   if (!sender) {
     throw new Error('MS_OUTLOOK_USER_EMAIL is not configured');
   }
 
   const client = await getGraphClient();
+  const eventPayload = {
+    subject: CLASS_EVENT_SUBJECT,
+    body: {
+      contentType: 'Text',
+      content: `Join Zoom Meeting: ${CLASS_ZOOM_LINK}`,
+    },
+    location: {
+      displayName: CLASS_ZOOM_LINK,
+    },
+    start: { dateTime: `${dateISO}T${startTime}:00`, timeZone: 'America/New_York' },
+    end:   { dateTime: `${dateISO}T${endTime}:00`,   timeZone: 'America/New_York' },
+    attendees: attendees.map((email) => ({
+      emailAddress: {
+        address: email,
+      },
+      type: 'required',
+    })),
+  };
 
-  return client
+  console.log(`[outlook] Creating event on ${sender} for ${dateISO} ${startTime}-${endTime}`);
+  const event = await client
     .api(`/users/${encodeURIComponent(sender)}/events`)
-    .post({
-      subject: 'AI Class Booking',
-      start: { dateTime: `${dateISO}T${startTime}:00`, timeZone: 'America/New_York' },
-      end:   { dateTime: `${dateISO}T${endTime}:00`,   timeZone: 'America/New_York' },
-    });
+    .post(eventPayload);
+  console.log(`[outlook] Created event on ${sender} with attendees: ${attendees.join(', ') || 'none'}`);
+
+  return event;
 }

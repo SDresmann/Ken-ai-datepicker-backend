@@ -18,6 +18,10 @@ mongoose.connect(ATLAS_URI)
 
 app.use(cors());
 app.use(express.json());
+app.use((req, res, next) => {
+  console.log(`[request] ${req.method} ${req.originalUrl}`);
+  next();
+});
 
 app.get('/health', (req, res) => {
   res.status(200).json({ ok: true });
