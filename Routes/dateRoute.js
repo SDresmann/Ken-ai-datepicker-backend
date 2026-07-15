@@ -1,7 +1,7 @@
 import express from 'express';
 import Booking from '../Modules/bookingModels.js';
 import { createOutlookEvent } from '../services/outlookServices.js';
-import { upsertHubSpotContact, inspectHubSpotSetup, inspectHubSpotFormsConfig, buildHubSpotContactPropertiesFromBooking, submitHubSpotFormSubmission, getHubSpotFormGuid } from '../services/hubspotService.js';
+import { upsertHubSpotContact, inspectHubSpotSetup, inspectHubSpotFormsConfig, buildHubSpotContactPropertiesFromBooking, prepareHubSpotFormSubmission, getHubSpotFormGuid } from '../services/hubspotService.js';
 import { HubSpotSyncError, logHubSpotFailure, serializeHubSpotError } from '../services/hubspotErrors.js';
 import { sendClassSignupNotifications } from '../services/emailService.js';
 const router = express.Router();
@@ -96,6 +96,7 @@ async function bookClass(date, bookingData = {}) {
     let hubspotError = null;
     let hubspotErrorDetail = null;
     let hubspotFormSubmission = null;
+    let hubspotFormSubmissionPayload = null;
 
     if (bookingData.email) {
         try {
@@ -112,10 +113,10 @@ async function bookClass(date, bookingData = {}) {
 
         if (isComplete) {
             try {
-                hubspotFormSubmission = await submitHubSpotFormSubmission(bookingPayload, { stage: 'complete' });
+                hubspotFormSubmissionPayload = await prepareHubSpotFormSubmission(bookingPayload, { stage: 'complete' });
             } catch (err) {
                 console.error(
-                    'HubSpot complete form submission failed:',
+                    'HubSpot complete form submission prepare failed:',
                     err.response?.data?.message || err.message || err
                 );
                 hubspotFormSubmission = {
@@ -148,6 +149,7 @@ async function bookClass(date, bookingData = {}) {
         hubspotError,
         hubspotErrorDetail,
         hubspotFormSubmission,
+        hubspotFormSubmissionPayload,
         signupEmail,
         signupEmailError,
     };
@@ -260,10 +262,11 @@ router.post('/hubspot-step-one', async (req, res) => {
         let hubspotFormSubmission = null;
         let hubspotFormSubmissionError = null;
         let hubspotFormSubmissionErrors = null;
+        let hubspotFormSubmissionPayload = null;
 
         if (Number(req.body.current_step) === 1) {
             try {
-                hubspotFormSubmission = await submitHubSpotFormSubmission(
+                hubspotFormSubmissionPayload = await prepareHubSpotFormSubmission(
                     {
                         ...req.body,
                         which_career_readiness_date_are_you_interested_in_attending_work: date,
@@ -301,6 +304,7 @@ router.post('/hubspot-step-one', async (req, res) => {
                 current_step: req.body.current_step || null,
             },
             hubspotFormSubmission,
+            hubspotFormSubmissionPayload,
             hubspotFormSubmissionError,
             hubspotFormSubmissionErrors,
             hubspotFormGuid: getHubSpotFormGuid(),

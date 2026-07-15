@@ -260,8 +260,19 @@ function parseWorkshopOptionDate(candidate, defaultYear = new Date().getFullYear
   return `${defaultYear}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
+const HUBSPOT_ENUM_VALUE_ALIASES = {
+  'prefer not to say': 'Prefer Not to Answer',
+  'prefer not to answer': 'Prefer Not to Answer',
+};
+
+function normalizeHubSpotEnumInput(rawValue) {
+  const trimmed = String(rawValue).trim();
+  return HUBSPOT_ENUM_VALUE_ALIASES[trimmed.toLowerCase()] || trimmed;
+}
+
 function findEnumerationOptionForValue(options, rawValue) {
-  const target = String(rawValue).trim().toLowerCase();
+  const normalized = normalizeHubSpotEnumInput(rawValue);
+  const target = normalized.toLowerCase();
 
   return options.find((option) => {
     const candidates = [option.value, option.label].filter(Boolean);
@@ -292,7 +303,7 @@ async function formatEnumerationProperty(name, rawValue, config) {
     }
 
     const match = findEnumerationOptionForValue(definition.options || [], rawValue);
-    return match ? match.value : rawValue;
+    return match ? match.value : normalizeHubSpotEnumInput(rawValue);
   } catch (err) {
     if (err.response?.status === 404) {
       return rawValue;
@@ -678,7 +689,7 @@ async function buildHubSpotFormFields(data = {}, stage = 'complete') {
     city: properties.city,
     fullname_state: properties.state,
     date_of_birth_date: properties.date_of_birth,
-    what_gender_do_you_identify_as_: properties.what_gender_do_you_identify_as_,
+    what_gender_do_you_identify_as_: normalizeHubSpotEnumInput(properties.what_gender_do_you_identify_as_),
     what_is_your_racial_and_ethnic_identity_: properties.what_is_your_racial_and_ethnic_identity_,
     are_you_still_finishing_high_school: properties.are_you_still_finishing_high_school,
     whats_the_full_name_of_your_school: properties.whats_the_full_name_of_your_school,
@@ -717,7 +728,7 @@ export function getHubSpotFormGuid() {
   );
 }
 
-export async function submitHubSpotFormSubmission(data = {}, { stage = 'complete' } = {}) {
+export async function prepareHubSpotFormSubmission(data = {}, { stage = 'complete' } = {}) {
   const portalId = process.env.HUBSPOT_PORTAL_ID || DEFAULT_HUBSPOT_PORTAL_ID;
   const formGuid = getHubSpotFormGuid();
 
@@ -753,11 +764,28 @@ export async function submitHubSpotFormSubmission(data = {}, { stage = 'complete
     );
   }
 
+  return {
+    stage,
+    portalId,
+    formGuid,
+    fields,
+    context: buildHubSpotFormContext(data, stage),
+  };
+}
+
+export async function submitHubSpotFormSubmission(data = {}, { stage = 'complete' } = {}) {
+  const prepared = await prepareHubSpotFormSubmission(data, { stage });
+
+  if (prepared.skipped) {
+    return prepared;
+  }
+
+  const { portalId, formGuid, fields, context } = prepared;
   const submitRequest = getHubSpotFormSubmitRequest(portalId, formGuid);
   const submissionBody = {
     submittedAt: Date.now(),
     fields,
-    context: buildHubSpotFormContext(data, stage),
+    context,
   };
 
   try {
