@@ -569,18 +569,7 @@ function buildHubSpotFormContext(data = {}, stage = 'complete') {
 }
 
 function getHubSpotFormSubmitRequest(portalId, formGuid) {
-  const accessToken = getAccessToken();
-
-  if (accessToken) {
-    return {
-      url: `https://api.hsforms.com/submissions/v3/integration/secure/submit/${portalId}/${formGuid}`,
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-    };
-  }
-
+  // Public endpoint — no PAT required. The secure endpoint needs form-submissions-write.
   return {
     url: `${HUBSPOT_FORMS_SUBMIT_URL}/${portalId}/${formGuid}`,
     headers: {
