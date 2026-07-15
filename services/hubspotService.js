@@ -552,8 +552,11 @@ function buildHubSpotFormContext(data = {}, stage = 'complete') {
     complete: 'Full Career Readiness Student Survey (RSH) - Complete',
   };
 
+  const defaultPageUri = 'https://ken-ai-datepicker-frontend.onrender.com';
+  const pageUri = String(data.page_uri || defaultPageUri).replace(/\/$/, '');
+
   const context = {
-    pageUri: data.page_uri || 'https://ken-ai-datepicker-frontend.onrender.com',
+    pageUri,
     pageName: data.page_name || pageNames[stage] || 'Career Readiness Registration',
   };
 
@@ -672,7 +675,6 @@ async function buildHubSpotFormFields(data = {}, stage = 'complete') {
   return objectToHubSpotFormFields({
     ...sharedFields,
     are_you_under_18_years_old: properties.are_you_under_18_years_old,
-    address: properties.address,
     city: properties.city,
     fullname_state: properties.state,
     date_of_birth_date: properties.date_of_birth,
