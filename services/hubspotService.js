@@ -505,56 +505,137 @@ export async function upsertHubSpotContact(properties) {
   }
 }
 
-export async function submitHubSpotFormSubmission(data = {}) {
-  const portalId = process.env.HUBSPOT_PORTAL_ID;
-  const formGuid = process.env.HUBSPOT_FORM_GUID;
+const HUBSPOT_FORMS_SUBMIT_URL = 'https://api.hsforms.com/submissions/v3/integration/submit';
+const DEFAULT_HUBSPOT_PORTAL_ID = '8489989';
+const DEFAULT_HUBSPOT_FORM_GUID_PARTIAL = '38fb4ad2-5d3e-4223-88d9-e390da4c0da6';
+const DEFAULT_HUBSPOT_FORM_GUID_COMPLETE = 'e3e38af4-9476-403f-b8ef-46cd0506de6e';
 
-  if (!portalId || !formGuid) {
-    return { skipped: true, reason: 'HUBSPOT_PORTAL_ID or HUBSPOT_FORM_GUID not configured' };
-  }
+function formatHubSpotFormBoolean(value) {
+  if (value === undefined || value === null || value === '') return '';
+  return value ? 'true' : 'false';
+}
 
-  const properties = buildHubSpotContactPropertiesFromBooking(data);
-  const fields = Object.entries({
-    email: properties.email,
-    firstname: properties.firstname,
-    lastname: properties.lastname,
-    phone: properties.phone,
-    address: properties.address,
-    city: properties.city,
-    state: properties.state,
-    zip: properties.zip,
-    career_readiness_form_status: properties.career_readiness_form_status,
-    which_career_readiness_date_are_you_interested_in_attending_work:
-      properties.which_career_readiness_date_are_you_interested_in_attending_work,
-  })
+function objectToHubSpotFormFields(values = {}) {
+  return Object.entries(values)
     .filter(([, value]) => value !== undefined && value !== null && value !== '')
     .map(([name, value]) => ({ name, value: String(value) }));
+}
 
-  if (!fields.some((field) => field.name === 'email')) {
-    return { skipped: true, reason: 'email is required for HubSpot form submission' };
+function buildHubSpotFormFields(data = {}, stage = 'complete') {
+  const properties = buildHubSpotContactPropertiesFromBooking(data);
+
+  if (stage === 'partial') {
+    return objectToHubSpotFormFields({
+      firstname: properties.firstname,
+      lastname: properties.lastname,
+      email: properties.email,
+      phone: properties.phone,
+      opt_in_check_for_emailing_texting_applicants: formatHubSpotFormBoolean(data.marketing_message_consent),
+    });
   }
 
-  const accessToken = getAccessToken();
-  const config = {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-    },
+  return objectToHubSpotFormFields({
+    firstname: properties.firstname,
+    lastname: properties.lastname,
+    email: properties.email,
+    phone: properties.phone,
+    zip: properties.zip,
+    opt_in_check_for_emailing_texting_applicants: formatHubSpotFormBoolean(data.marketing_message_consent),
+    which_career_readiness_dates_are_you_interested_in_attending:
+      properties.which_career_readiness_date_are_you_interested_in_attending_work,
+    ready_set_hire_survey_status: properties.career_readiness_form_status || 'Complete',
+    choose_your_2nd_date_for_career_readiness:
+      data.choose_the_2nd_date_for_your_career_readiness_class_work
+        ? normalizeDateString(data.choose_the_2nd_date_for_your_career_readiness_class_work)
+        : '',
+    choose_your_3rd_date_for_career_readiness:
+      data.choose_the_3rd_date_for_your_career_readiness_class_work
+        ? normalizeDateString(data.choose_the_3rd_date_for_your_career_readiness_class_work)
+        : '',
+    are_you_under_18_years_old: properties.are_you_under_18_years_old,
+    address: properties.address,
+    city: properties.city,
+    fullname_state: properties.state,
+    date_of_birth_date: properties.date_of_birth,
+    what_gender_do_you_identify_as_: properties.what_gender_do_you_identify_as_,
+    what_is_your_racial_and_ethnic_identity_: properties.what_is_your_racial_and_ethnic_identity_,
+    are_you_still_finishing_high_school: properties.are_you_still_finishing_high_school,
+    whats_the_full_name_of_your_school: properties.whats_the_full_name_of_your_school,
+    what_grade_are_you_currently_in: properties.what_grade_are_you_currently_in,
+    highest_level_of_education_: properties.highest_level_of_education_,
+    i_or_a_family_member_i_live_with_receive_the_following_type_of_public_assistancecheck_all_that_apply:
+      properties.i_or_a_family_member_i_live_with_receive_the_following_type_of_public_assistancecheck_all_that_apply,
+    please_check_all_of_these_situations_that_apply_to_you:
+      properties.please_check_all_of_these_situations_that_apply_to_you,
+    are_you_a_parent: properties.are_you_a_parent,
+    how_many_children_do_you_have: properties.how_many_children_do_you_have,
+    are_you_a_single_parent: properties.are_you_a_single_parent,
+    are_you_involved_in_the_justice_system: properties.are_you_involved_in_the_justice_system,
+    what_is_your_status_in_the_justice_system_check_all_that_apply:
+      properties.what_is_your_status_in_the_justice_system_check_all_that_apply,
+    what_is_your_offense_status_check_all_that_apply:
+      properties.what_is_your_offense_status_check_all_that_apply,
+    what_is_your_system_level_check_all_that_apply:
+      properties.what_is_your_system_level_check_all_that_apply,
+    do_you_grant_permission_for_your_data_as_it_relates_to_this_program_to_be_collected_and_tracked:
+      properties.do_you_grant_permission_for_your_data_as_it_relates_to_this_program_to_be_collected_and_tracked,
+    i_consent_to_the_irrevocable_right_to_use_my_name__or_a_fictional_name___statement_s__story__photog:
+      properties.i_consent_to_the_irrevocable_right_to_use_my_name__or_a_fictional_name___statement_s__story__photog,
+    digital_signature: properties.digital_signature,
+    date_signed: properties.date_signed,
+    whats_your_employment_status_pick_only_1: properties.whats_your_employment_status_pick_only_1,
+  });
+}
+
+function getHubSpotFormGuid(stage = 'complete') {
+  if (stage === 'partial') {
+    return process.env.HUBSPOT_FORM_GUID_PARTIAL || DEFAULT_HUBSPOT_FORM_GUID_PARTIAL;
+  }
+
+  return (
+    process.env.HUBSPOT_FORM_GUID_COMPLETE ||
+    process.env.HUBSPOT_FORM_GUID ||
+    DEFAULT_HUBSPOT_FORM_GUID_COMPLETE
+  );
+}
+
+export async function submitHubSpotFormSubmission(data = {}, { stage = 'complete' } = {}) {
+  const portalId = process.env.HUBSPOT_PORTAL_ID || DEFAULT_HUBSPOT_PORTAL_ID;
+  const formGuid = getHubSpotFormGuid(stage);
+
+  if (!portalId || !formGuid) {
+    return { skipped: true, reason: 'HubSpot portal ID or form GUID is not configured', stage };
+  }
+
+  const fields = buildHubSpotFormFields(data, stage);
+
+  if (!fields.some((field) => field.name === 'email')) {
+    return { skipped: true, reason: 'email is required for HubSpot form submission', stage };
+  }
+
+  const pageNames = {
+    partial: 'Young KY KA Website Form - Partial',
+    complete: 'Full Career Readiness Student Survey - Complete',
   };
 
   const response = await axios.post(
-    `https://api.hsforms.com/submissions/v3/integration/submit/${portalId}/${formGuid}`,
+    `${HUBSPOT_FORMS_SUBMIT_URL}/${portalId}/${formGuid}`,
     {
+      submittedAt: Date.now(),
       fields,
       context: {
         pageUri: data.page_uri || 'https://ken-ai-datepicker-frontend.onrender.com',
-        pageName: data.page_name || 'Career Readiness Registration',
+        pageName: data.page_name || pageNames[stage] || 'Career Readiness Registration',
       },
     },
-    config
+    {
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }
   );
 
-  return { ok: true, submission: response.data };
+  return { ok: true, stage, formGuid, submission: response.data };
 }
 
 export async function inspectHubSpotSetup() {

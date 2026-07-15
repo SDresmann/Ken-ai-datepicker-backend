@@ -3,6 +3,7 @@ import Booking from '../Modules/bookingModels.js';
 import { createOutlookEvent } from '../services/outlookServices.js';
 import { upsertHubSpotContact, inspectHubSpotSetup, buildHubSpotContactPropertiesFromBooking, submitHubSpotFormSubmission } from '../services/hubspotService.js';
 import { HubSpotSyncError, logHubSpotFailure, serializeHubSpotError } from '../services/hubspotErrors.js';
+import { sendApplicantConfirmationEmail, sendClassSignupNotifications } from '../services/emailService.js';
 const router = express.Router();
 
 function getClassTimes(dateISO) {
@@ -94,21 +95,6 @@ async function bookClass(date, bookingData = {}) {
     if (bookingData.email) {
         try {
             hubspot = await upsertHubSpotContact(buildHubSpotContactPropertiesFromBooking(bookingPayload));
-
-            if ((bookingPayload.career_readiness_form_status || 'Complete') === 'Complete') {
-                try {
-                    hubspotFormSubmission = await submitHubSpotFormSubmission(bookingPayload);
-                } catch (err) {
-                    console.error(
-                        'HubSpot form submission failed:',
-                        err.response?.data?.message || err.message || err
-                    );
-                    hubspotFormSubmission = {
-                        ok: false,
-                        detail: err.response?.data?.message || err.message || 'HubSpot form submission failed',
-                    };
-                }
-            }
         } catch (err) {
             hubspotError = err instanceof HubSpotSyncError
                 ? err.message
@@ -117,6 +103,41 @@ async function bookClass(date, bookingData = {}) {
                 attemptedPayload: buildHubSpotContactPropertiesFromBooking(bookingPayload),
             });
             console.error('HubSpot full form sync failed:', hubspotErrorDetail);
+        }
+
+        try {
+            hubspotFormSubmission = await submitHubSpotFormSubmission(bookingPayload, { stage: 'complete' });
+        } catch (err) {
+            console.error(
+                'HubSpot complete form submission failed:',
+                err.response?.data?.message || err.message || err
+            );
+            hubspotFormSubmission = {
+                ok: false,
+                stage: 'complete',
+                detail: err.response?.data?.message || err.message || 'HubSpot form submission failed',
+            };
+        }
+    }
+
+    let signupEmail = null;
+    let signupEmailError = null;
+    let confirmationEmail = null;
+    let confirmationEmailError = null;
+
+    if ((bookingPayload.career_readiness_form_status || 'Complete') === 'Complete') {
+        try {
+            confirmationEmail = await sendApplicantConfirmationEmail(bookingPayload);
+        } catch (err) {
+            confirmationEmailError = err.response?.data?.error?.message || err.message || 'Applicant confirmation email failed';
+            console.error('[email] Applicant confirmation failed:', confirmationEmailError);
+        }
+
+        try {
+            signupEmail = await sendClassSignupNotifications(bookingPayload);
+        } catch (err) {
+            signupEmailError = err.response?.data?.error?.message || err.message || 'Staff notification email failed';
+            console.error('[email] Staff notifications failed:', signupEmailError);
         }
     }
 
@@ -129,6 +150,10 @@ async function bookClass(date, bookingData = {}) {
         hubspotError,
         hubspotErrorDetail,
         hubspotFormSubmission,
+        signupEmail,
+        signupEmailError,
+        confirmationEmail,
+        confirmationEmailError,
     };
 }
 
@@ -236,6 +261,27 @@ router.post('/hubspot-step-one', async (req, res) => {
     try {
         const contact = await upsertHubSpotContact(hubspotInput);
 
+        let hubspotFormSubmission = null;
+        let hubspotFormSubmissionError = null;
+
+        if (Number(req.body.current_step) === 1) {
+            try {
+                hubspotFormSubmission = await submitHubSpotFormSubmission(
+                    {
+                        ...req.body,
+                        which_career_readiness_date_are_you_interested_in_attending_work: date,
+                        class_date: date,
+                        career_readiness_form_status: req.body.career_readiness_form_status || 'Partial',
+                    },
+                    { stage: 'partial' }
+                );
+            } catch (err) {
+                hubspotFormSubmissionError =
+                    err.response?.data?.message || err.message || 'HubSpot partial form submission failed';
+                console.error('HubSpot partial form submission failed:', hubspotFormSubmissionError);
+            }
+        }
+
         res.status(200).json({
             ok: true,
             booking: stepOneBooking,
@@ -248,7 +294,10 @@ router.post('/hubspot-step-one', async (req, res) => {
                 which_career_readiness_date_are_you_interested_in_attending_work: date,
                 choose_the_2nd_date_for_your_career_readiness_class_work: req.body.choose_the_2nd_date_for_your_career_readiness_class_work || '',
                 choose_the_3rd_date_for_your_career_readiness_class_work: req.body.choose_the_3rd_date_for_your_career_readiness_class_work || '',
+                current_step: req.body.current_step || null,
             },
+            hubspotFormSubmission,
+            hubspotFormSubmissionError,
             ...contact,
         });
     } catch (err) {
