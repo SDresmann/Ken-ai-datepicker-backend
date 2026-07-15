@@ -259,6 +259,7 @@ router.post('/hubspot-step-one', async (req, res) => {
 
         let hubspotFormSubmission = null;
         let hubspotFormSubmissionError = null;
+        let hubspotFormSubmissionErrors = null;
 
         if (Number(req.body.current_step) === 1) {
             try {
@@ -272,8 +273,15 @@ router.post('/hubspot-step-one', async (req, res) => {
                     { stage: 'partial' }
                 );
             } catch (err) {
+                const details = err instanceof HubSpotSyncError
+                    ? serializeHubSpotError(err, { step: 'hubspot_form_submission' })
+                    : serializeHubSpotError(err, { step: 'hubspot_form_submission' });
+                hubspotFormSubmissionErrors = details.hubspotErrors;
                 hubspotFormSubmissionError =
-                    err.response?.data?.message || err.message || 'HubSpot partial form submission failed';
+                    details.hubspotErrors?.map((entry) => entry.message).filter(Boolean).join(' | ')
+                    || details.detail
+                    || err.message
+                    || 'HubSpot partial form submission failed';
                 console.error('HubSpot partial form submission failed:', hubspotFormSubmissionError);
             }
         }
@@ -294,6 +302,7 @@ router.post('/hubspot-step-one', async (req, res) => {
             },
             hubspotFormSubmission,
             hubspotFormSubmissionError,
+            hubspotFormSubmissionErrors,
             ...contact,
         });
     } catch (err) {

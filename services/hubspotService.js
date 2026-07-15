@@ -41,8 +41,8 @@ export function buildHubSpotContactPropertiesFromBooking(data = {}) {
 
   return {
     email: data.email,
-    firstname: data.first_name,
-    lastname: data.last_name,
+    firstname: String(data.first_name || data.firstname || '').trim(),
+    lastname: String(data.last_name || data.lastname || '').trim(),
     phone: data.phone,
     address: data.address,
     city: data.city,
@@ -227,11 +227,37 @@ async function filterExistingProperties(properties, config) {
 
 function findEnumerationOptionForDate(options, dateISO) {
   const target = normalizeDateString(dateISO);
+  const workshopYear = Number(target.slice(0, 4)) || new Date().getFullYear();
 
   return options.find((option) => {
     const candidates = [option.value, option.label].filter(Boolean);
-    return candidates.some((candidate) => normalizeDateString(candidate) === target);
+    return candidates.some((candidate) => {
+      const parsedWorkshopDate = parseWorkshopOptionDate(candidate, workshopYear);
+      if (parsedWorkshopDate) {
+        return parsedWorkshopDate === target;
+      }
+
+      return normalizeDateString(candidate) === target;
+    });
   });
+}
+
+const WORKSHOP_MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+function parseWorkshopOptionDate(candidate, defaultYear = new Date().getFullYear()) {
+  const match = String(candidate).match(/,\s*([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?/);
+  if (!match) return '';
+
+  const monthIndex = WORKSHOP_MONTH_NAMES.findIndex(
+    (month) => month.toLowerCase() === match[1].toLowerCase()
+  );
+  if (monthIndex < 0) return '';
+
+  const day = Number(match[2]);
+  return `${defaultYear}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function findEnumerationOptionForValue(options, rawValue) {
@@ -520,9 +546,76 @@ function objectToHubSpotFormFields(values = {}) {
     .map(([name, value]) => ({ name, value: String(value) }));
 }
 
-function buildHubSpotFormFields(data = {}, stage = 'complete') {
+async function formatHubSpotFormDateField(propertyName, dateISO, config) {
+  if (!dateISO) return '';
+
+  const target = normalizeDateString(dateISO);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(target)) return '';
+
+  try {
+    const definition = await getPropertyDefinition(propertyName, config);
+    if (definition.type === 'enumeration') {
+      const match = findEnumerationOptionForDate(definition.options || [], target);
+      return match ? match.value : '';
+    }
+
+    if (definition.type === 'date') {
+      return target;
+    }
+
+    return target;
+  } catch (err) {
+    if (err.response?.status === 404) {
+      return '';
+    }
+    throw err;
+  }
+}
+
+async function buildHubSpotFormFields(data = {}, stage = 'complete') {
   const properties = buildHubSpotContactPropertiesFromBooking(data);
   const formStatus = stage === 'partial' ? 'Partial' : (properties.career_readiness_form_status || 'Complete');
+  const accessToken = getAccessToken();
+  const config = accessToken
+    ? {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    : null;
+
+  const primaryWorkshopDate = properties.which_career_readiness_date_are_you_interested_in_attending_work;
+  const secondWorkshopDate = data.choose_the_2nd_date_for_your_career_readiness_class_work
+    ? normalizeDateString(data.choose_the_2nd_date_for_your_career_readiness_class_work)
+    : '';
+  const thirdWorkshopDate = data.choose_the_3rd_date_for_your_career_readiness_class_work
+    ? normalizeDateString(data.choose_the_3rd_date_for_your_career_readiness_class_work)
+    : '';
+
+  const formattedDates = config
+    ? {
+        which_career_readiness_dates_are_you_interested_in_attending: await formatHubSpotFormDateField(
+          'which_career_readiness_dates_are_you_interested_in_attending',
+          primaryWorkshopDate,
+          config
+        ),
+        choose_your_2nd_date_for_career_readiness: await formatHubSpotFormDateField(
+          'choose_your_2nd_date_for_career_readiness',
+          secondWorkshopDate,
+          config
+        ),
+        choose_your_3rd_date_for_career_readiness: await formatHubSpotFormDateField(
+          'choose_your_3rd_date_for_career_readiness',
+          thirdWorkshopDate,
+          config
+        ),
+      }
+    : {
+        which_career_readiness_dates_are_you_interested_in_attending: primaryWorkshopDate,
+        choose_your_2nd_date_for_career_readiness: secondWorkshopDate,
+        choose_your_3rd_date_for_career_readiness: thirdWorkshopDate,
+      };
 
   const sharedFields = {
     firstname: properties.firstname,
@@ -531,17 +624,8 @@ function buildHubSpotFormFields(data = {}, stage = 'complete') {
     phone: properties.phone,
     zip: properties.zip,
     opt_in_check_for_emailing_texting_applicants: formatHubSpotFormBoolean(data.marketing_message_consent),
-    which_career_readiness_dates_are_you_interested_in_attending:
-      properties.which_career_readiness_date_are_you_interested_in_attending_work,
+    ...formattedDates,
     ready_set_hire_survey_status: formStatus,
-    choose_your_2nd_date_for_career_readiness:
-      data.choose_the_2nd_date_for_your_career_readiness_class_work
-        ? normalizeDateString(data.choose_the_2nd_date_for_your_career_readiness_class_work)
-        : '',
-    choose_your_3rd_date_for_career_readiness:
-      data.choose_the_3rd_date_for_your_career_readiness_class_work
-        ? normalizeDateString(data.choose_the_3rd_date_for_your_career_readiness_class_work)
-        : '',
   };
 
   if (stage === 'partial') {
@@ -603,10 +687,32 @@ export async function submitHubSpotFormSubmission(data = {}, { stage = 'complete
     return { skipped: true, reason: 'HubSpot portal ID or form GUID is not configured', stage };
   }
 
-  const fields = buildHubSpotFormFields(data, stage);
+  const fields = await buildHubSpotFormFields(data, stage);
 
   if (!fields.some((field) => field.name === 'email')) {
     return { skipped: true, reason: 'email is required for HubSpot form submission', stage };
+  }
+
+  const workshopDateField = fields.find(
+    (field) => field.name === 'which_career_readiness_dates_are_you_interested_in_attending'
+  );
+  if (!workshopDateField?.value) {
+    const primaryDate = data.which_career_readiness_date_are_you_interested_in_attending_work
+      || data.class_date
+      || '';
+    throw new HubSpotSyncError(
+      'Workshop date does not match a HubSpot form option. Please choose one of the scheduled workshop dates.',
+      {
+        step: 'hubspot_form_submission',
+        hubspot: {
+          errors: [{
+            message: `Could not map workshop date "${primaryDate}" to which_career_readiness_dates_are_you_interested_in_attending`,
+            errorType: 'REQUIRED_FIELD',
+          }],
+        },
+        attemptedPayload: { stage, portalId, formGuid, fields },
+      }
+    );
   }
 
   const pageNames = {
