@@ -507,8 +507,7 @@ export async function upsertHubSpotContact(properties) {
 
 const HUBSPOT_FORMS_SUBMIT_URL = 'https://api.hsforms.com/submissions/v3/integration/submit';
 const DEFAULT_HUBSPOT_PORTAL_ID = '8489989';
-const DEFAULT_HUBSPOT_FORM_GUID_PARTIAL = '38fb4ad2-5d3e-4223-88d9-e390da4c0da6';
-const DEFAULT_HUBSPOT_FORM_GUID_COMPLETE = 'e3e38af4-9476-403f-b8ef-46cd0506de6e';
+const DEFAULT_HUBSPOT_FORM_GUID = 'e3e38af4-9476-403f-b8ef-46cd0506de6e';
 
 function formatHubSpotFormBoolean(value) {
   if (value === undefined || value === null || value === '') return '';
@@ -523,18 +522,9 @@ function objectToHubSpotFormFields(values = {}) {
 
 function buildHubSpotFormFields(data = {}, stage = 'complete') {
   const properties = buildHubSpotContactPropertiesFromBooking(data);
+  const formStatus = stage === 'partial' ? 'Partial' : (properties.career_readiness_form_status || 'Complete');
 
-  if (stage === 'partial') {
-    return objectToHubSpotFormFields({
-      firstname: properties.firstname,
-      lastname: properties.lastname,
-      email: properties.email,
-      phone: properties.phone,
-      opt_in_check_for_emailing_texting_applicants: formatHubSpotFormBoolean(data.marketing_message_consent),
-    });
-  }
-
-  return objectToHubSpotFormFields({
+  const sharedFields = {
     firstname: properties.firstname,
     lastname: properties.lastname,
     email: properties.email,
@@ -543,7 +533,7 @@ function buildHubSpotFormFields(data = {}, stage = 'complete') {
     opt_in_check_for_emailing_texting_applicants: formatHubSpotFormBoolean(data.marketing_message_consent),
     which_career_readiness_dates_are_you_interested_in_attending:
       properties.which_career_readiness_date_are_you_interested_in_attending_work,
-    ready_set_hire_survey_status: properties.career_readiness_form_status || 'Complete',
+    ready_set_hire_survey_status: formStatus,
     choose_your_2nd_date_for_career_readiness:
       data.choose_the_2nd_date_for_your_career_readiness_class_work
         ? normalizeDateString(data.choose_the_2nd_date_for_your_career_readiness_class_work)
@@ -552,6 +542,14 @@ function buildHubSpotFormFields(data = {}, stage = 'complete') {
       data.choose_the_3rd_date_for_your_career_readiness_class_work
         ? normalizeDateString(data.choose_the_3rd_date_for_your_career_readiness_class_work)
         : '',
+  };
+
+  if (stage === 'partial') {
+    return objectToHubSpotFormFields(sharedFields);
+  }
+
+  return objectToHubSpotFormFields({
+    ...sharedFields,
     are_you_under_18_years_old: properties.are_you_under_18_years_old,
     address: properties.address,
     city: properties.city,
@@ -588,15 +586,13 @@ function buildHubSpotFormFields(data = {}, stage = 'complete') {
 }
 
 function getHubSpotFormGuid(stage = 'complete') {
+  const sharedGuid = process.env.HUBSPOT_FORM_GUID || DEFAULT_HUBSPOT_FORM_GUID;
+
   if (stage === 'partial') {
-    return process.env.HUBSPOT_FORM_GUID_PARTIAL || DEFAULT_HUBSPOT_FORM_GUID_PARTIAL;
+    return process.env.HUBSPOT_FORM_GUID_PARTIAL || sharedGuid;
   }
 
-  return (
-    process.env.HUBSPOT_FORM_GUID_COMPLETE ||
-    process.env.HUBSPOT_FORM_GUID ||
-    DEFAULT_HUBSPOT_FORM_GUID_COMPLETE
-  );
+  return process.env.HUBSPOT_FORM_GUID_COMPLETE || sharedGuid;
 }
 
 export async function submitHubSpotFormSubmission(data = {}, { stage = 'complete' } = {}) {
@@ -614,28 +610,105 @@ export async function submitHubSpotFormSubmission(data = {}, { stage = 'complete
   }
 
   const pageNames = {
-    partial: 'Young KY KA Website Form - Partial',
-    complete: 'Full Career Readiness Student Survey - Complete',
+    partial: 'Full_Career Readiness Student Survey (RSH) - Partial',
+    complete: 'Full_Career Readiness Student Survey (RSH) - Complete',
   };
 
-  const response = await axios.post(
-    `${HUBSPOT_FORMS_SUBMIT_URL}/${portalId}/${formGuid}`,
-    {
-      submittedAt: Date.now(),
-      fields,
-      context: {
-        pageUri: data.page_uri || 'https://ken-ai-datepicker-frontend.onrender.com',
-        pageName: data.page_name || pageNames[stage] || 'Career Readiness Registration',
+  try {
+    const response = await axios.post(
+      `${HUBSPOT_FORMS_SUBMIT_URL}/${portalId}/${formGuid}`,
+      {
+        submittedAt: Date.now(),
+        fields,
+        context: {
+          pageUri: data.page_uri || 'https://ken-ai-datepicker-frontend.onrender.com',
+          pageName: data.page_name || pageNames[stage] || 'Career Readiness Registration',
+        },
       },
-    },
-    {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    }
-  );
+      {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }
+    );
 
-  return { ok: true, stage, formGuid, submission: response.data };
+    return { ok: true, stage, formGuid, portalId, fieldsSubmitted: fields.length, submission: response.data };
+  } catch (err) {
+    const hubspot = err.response?.data;
+    const detail = hubspot?.message || hubspot?.errors?.map((entry) => entry.message).join(' | ') || err.message;
+    console.error(`[hubspot-form:${stage}] submission failed`, detail, hubspot || '');
+    throw new HubSpotSyncError(detail || 'HubSpot form submission failed', {
+      step: 'hubspot_form_submission',
+      status: err.response?.status || null,
+      hubspot,
+      attemptedPayload: { stage, portalId, formGuid, fields },
+    });
+  }
+}
+
+export async function inspectHubSpotFormsConfig() {
+  const accessToken = getAccessToken();
+
+  if (!accessToken) {
+    return {
+      ok: false,
+      detail: 'HubSpot access token is not configured',
+    };
+  }
+
+  const config = {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+  };
+
+  let portalId = process.env.HUBSPOT_PORTAL_ID || DEFAULT_HUBSPOT_PORTAL_ID;
+
+  try {
+    const account = await axios.get('https://api.hubapi.com/account-info/v3/details', config);
+    portalId = String(account.data.portalId || portalId);
+  } catch (err) {
+    console.warn('Could not resolve HubSpot portal from token:', err.response?.data?.message || err.message);
+  }
+
+  const forms = {
+    partial: {
+      envKey: 'HUBSPOT_FORM_GUID_PARTIAL',
+      formGuid: getHubSpotFormGuid('partial'),
+      stage: 'partial',
+      when: 'After user completes step 1 and clicks Next',
+    },
+    complete: {
+      envKey: 'HUBSPOT_FORM_GUID_COMPLETE',
+      formGuid: getHubSpotFormGuid('complete'),
+      stage: 'complete',
+      when: 'After user submits the full application',
+    },
+  };
+
+  for (const entry of Object.values(forms)) {
+    try {
+      const response = await axios.get(
+        `https://api.hubapi.com/marketing/v3/forms/${entry.formGuid}`,
+        config
+      );
+      entry.exists = true;
+      entry.name = response.data.name;
+      entry.fieldCount = (response.data.fieldGroups || []).flatMap((group) => group.fields || []).length;
+    } catch (err) {
+      entry.exists = false;
+      entry.status = err.response?.status || null;
+      entry.detail = err.response?.data?.message || err.message;
+    }
+  }
+
+  return {
+    ok: true,
+    portalId,
+    whereToLook: 'HubSpot → Marketing → Forms (make sure you are in this portal ID)',
+    forms,
+  };
 }
 
 export async function inspectHubSpotSetup() {

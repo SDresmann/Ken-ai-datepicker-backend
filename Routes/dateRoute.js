@@ -1,9 +1,9 @@
 import express from 'express';
 import Booking from '../Modules/bookingModels.js';
 import { createOutlookEvent } from '../services/outlookServices.js';
-import { upsertHubSpotContact, inspectHubSpotSetup, buildHubSpotContactPropertiesFromBooking, submitHubSpotFormSubmission } from '../services/hubspotService.js';
+import { upsertHubSpotContact, inspectHubSpotSetup, inspectHubSpotFormsConfig, buildHubSpotContactPropertiesFromBooking, submitHubSpotFormSubmission } from '../services/hubspotService.js';
 import { HubSpotSyncError, logHubSpotFailure, serializeHubSpotError } from '../services/hubspotErrors.js';
-import { sendApplicantConfirmationEmail, sendClassSignupNotifications } from '../services/emailService.js';
+import { sendClassSignupNotifications } from '../services/emailService.js';
 const router = express.Router();
 
 function getClassTimes(dateISO) {
@@ -53,12 +53,14 @@ async function bookClass(date, bookingData = {}) {
     if (!times) return { ok: false, reason: 'No classes on that day' };
 
     const classDate = bookingData.which_career_readiness_date_are_you_interested_in_attending_work || date;
+    const formStatus = bookingData.career_readiness_form_status || 'Partial';
+    const isComplete = formStatus === 'Complete';
     const bookingPayload = {
         ...bookingData,
         date,
         which_career_readiness_date_are_you_interested_in_attending_work: classDate,
-        career_readiness_form_status: bookingData.career_readiness_form_status || 'Complete',
-        is_complete: true,
+        career_readiness_form_status: formStatus,
+        is_complete: isComplete,
     };
     const booking = bookingData.email
         ? await Booking.findOneAndUpdate(
@@ -70,21 +72,24 @@ async function bookClass(date, bookingData = {}) {
 
     let outlookEventCreated = false;
     let outlookEventsCreated = 0;
-    try {
-        await createOutlookEvent({ dateISO: date, ...times });
-        outlookEventsCreated += 1;
 
-        for (const additionalDate of getAdditionalWorkshopDates(bookingData)) {
-            const additionalTimes = getClassTimes(additionalDate);
-            if (additionalTimes) {
-                await createOutlookEvent({ dateISO: additionalDate, ...additionalTimes });
-                outlookEventsCreated += 1;
+    if (isComplete) {
+        try {
+            await createOutlookEvent({ dateISO: date, ...times });
+            outlookEventsCreated += 1;
+
+            for (const additionalDate of getAdditionalWorkshopDates(bookingData)) {
+                const additionalTimes = getClassTimes(additionalDate);
+                if (additionalTimes) {
+                    await createOutlookEvent({ dateISO: additionalDate, ...additionalTimes });
+                    outlookEventsCreated += 1;
+                }
             }
-        }
 
-        outlookEventCreated = true;
-    } catch (err) {
-        console.error('Outlook event failed:', err.message || err);
+            outlookEventCreated = true;
+        } catch (err) {
+            console.error('Outlook event failed:', err.message || err);
+        }
     }
 
     let hubspot = null;
@@ -105,34 +110,27 @@ async function bookClass(date, bookingData = {}) {
             console.error('HubSpot full form sync failed:', hubspotErrorDetail);
         }
 
-        try {
-            hubspotFormSubmission = await submitHubSpotFormSubmission(bookingPayload, { stage: 'complete' });
-        } catch (err) {
-            console.error(
-                'HubSpot complete form submission failed:',
-                err.response?.data?.message || err.message || err
-            );
-            hubspotFormSubmission = {
-                ok: false,
-                stage: 'complete',
-                detail: err.response?.data?.message || err.message || 'HubSpot form submission failed',
-            };
+        if (isComplete) {
+            try {
+                hubspotFormSubmission = await submitHubSpotFormSubmission(bookingPayload, { stage: 'complete' });
+            } catch (err) {
+                console.error(
+                    'HubSpot complete form submission failed:',
+                    err.response?.data?.message || err.message || err
+                );
+                hubspotFormSubmission = {
+                    ok: false,
+                    stage: 'complete',
+                    detail: err.response?.data?.message || err.message || 'HubSpot form submission failed',
+                };
+            }
         }
     }
 
     let signupEmail = null;
     let signupEmailError = null;
-    let confirmationEmail = null;
-    let confirmationEmailError = null;
 
-    if ((bookingPayload.career_readiness_form_status || 'Complete') === 'Complete') {
-        try {
-            confirmationEmail = await sendApplicantConfirmationEmail(bookingPayload);
-        } catch (err) {
-            confirmationEmailError = err.response?.data?.error?.message || err.message || 'Applicant confirmation email failed';
-            console.error('[email] Applicant confirmation failed:', confirmationEmailError);
-        }
-
+    if (isComplete && bookingData.email) {
         try {
             signupEmail = await sendClassSignupNotifications(bookingPayload);
         } catch (err) {
@@ -152,8 +150,6 @@ async function bookClass(date, bookingData = {}) {
         hubspotFormSubmission,
         signupEmail,
         signupEmailError,
-        confirmationEmail,
-        confirmationEmailError,
     };
 }
 
@@ -326,6 +322,20 @@ router.get('/hubspot-debug', async (req, res) => {
         res.status(500).json({
             ok: false,
             step: 'hubspot_debug',
+            detail: err.message,
+        });
+    }
+});
+
+
+router.get('/hubspot-forms-debug', async (req, res) => {
+    try {
+        const report = await inspectHubSpotFormsConfig();
+        res.status(report.ok ? 200 : 500).json(report);
+    } catch (err) {
+        res.status(500).json({
+            ok: false,
+            step: 'hubspot_forms_debug',
             detail: err.message,
         });
     }
