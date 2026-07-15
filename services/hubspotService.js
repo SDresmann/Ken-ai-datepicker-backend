@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { HubSpotSyncError } from './hubspotErrors.js';
+import { HubSpotSyncError, serializeHubSpotError } from './hubspotErrors.js';
 
 const HUBSPOT_CONTACTS_URL = 'https://api.hubapi.com/crm/v3/objects/contacts';
 const HUBSPOT_CONTACT_SEARCH_URL = 'https://api.hubapi.com/crm/v3/objects/contacts/search';
@@ -83,6 +83,7 @@ export function buildHubSpotContactPropertiesFromBooking(data = {}) {
     digital_signature: data.digital_signature,
     date_signed: data.date_signed ? normalizeDateString(data.date_signed) : '',
     whats_your_employment_status_pick_only_1: data.whats_your_employment_status_pick_only_1,
+    are_you_unemployed: data.are_you_unemployed,
     career_readiness_form_status: data.career_readiness_form_status || '',
     start_date_desired: workshopDate || '',
     which_career_readiness_date_are_you_interested_in_attending_work: workshopDate || '',
@@ -502,6 +503,58 @@ export async function upsertHubSpotContact(properties) {
   } catch (err) {
     throw buildHubSpotSyncError(err, 'hubspot_contact_write', payloadProperties, skippedProperties);
   }
+}
+
+export async function submitHubSpotFormSubmission(data = {}) {
+  const portalId = process.env.HUBSPOT_PORTAL_ID;
+  const formGuid = process.env.HUBSPOT_FORM_GUID;
+
+  if (!portalId || !formGuid) {
+    return { skipped: true, reason: 'HUBSPOT_PORTAL_ID or HUBSPOT_FORM_GUID not configured' };
+  }
+
+  const properties = buildHubSpotContactPropertiesFromBooking(data);
+  const fields = Object.entries({
+    email: properties.email,
+    firstname: properties.firstname,
+    lastname: properties.lastname,
+    phone: properties.phone,
+    address: properties.address,
+    city: properties.city,
+    state: properties.state,
+    zip: properties.zip,
+    career_readiness_form_status: properties.career_readiness_form_status,
+    which_career_readiness_date_are_you_interested_in_attending_work:
+      properties.which_career_readiness_date_are_you_interested_in_attending_work,
+  })
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .map(([name, value]) => ({ name, value: String(value) }));
+
+  if (!fields.some((field) => field.name === 'email')) {
+    return { skipped: true, reason: 'email is required for HubSpot form submission' };
+  }
+
+  const accessToken = getAccessToken();
+  const config = {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+  };
+
+  const response = await axios.post(
+    `https://api.hsforms.com/submissions/v3/integration/submit/${portalId}/${formGuid}`,
+    {
+      fields,
+      context: {
+        pageUri: data.page_uri || 'https://ken-ai-datepicker-frontend.onrender.com',
+        pageName: data.page_name || 'Career Readiness Registration',
+      },
+    },
+    config
+  );
+
+  return { ok: true, submission: response.data };
 }
 
 export async function inspectHubSpotSetup() {

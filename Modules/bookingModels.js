@@ -38,6 +38,7 @@ const bookingSchema = new mongoose.Schema({
     i_consent_to_the_irrevocable_right_to_use_my_name__or_a_fictional_name___statement_s__story__photog: Boolean,
     digital_signature: String,
     date_signed: String,
+    whats_your_employment_status_pick_only_1: String,
     are_you_unemployed: String,
     career_readiness_form_status: String,
     is_complete: {

@@ -1,8 +1,8 @@
 import express from 'express';
 import Booking from '../Modules/bookingModels.js';
 import { createOutlookEvent } from '../services/outlookServices.js';
-import { upsertHubSpotContact, inspectHubSpotSetup, buildHubSpotContactPropertiesFromBooking } from '../services/hubspotService.js';
-import { HubSpotSyncError, logHubSpotFailure } from '../services/hubspotErrors.js';
+import { upsertHubSpotContact, inspectHubSpotSetup, buildHubSpotContactPropertiesFromBooking, submitHubSpotFormSubmission } from '../services/hubspotService.js';
+import { HubSpotSyncError, logHubSpotFailure, serializeHubSpotError } from '../services/hubspotErrors.js';
 const router = express.Router();
 
 function getClassTimes(dateISO) {
@@ -88,15 +88,35 @@ async function bookClass(date, bookingData = {}) {
 
     let hubspot = null;
     let hubspotError = null;
+    let hubspotErrorDetail = null;
+    let hubspotFormSubmission = null;
 
     if (bookingData.email) {
         try {
             hubspot = await upsertHubSpotContact(buildHubSpotContactPropertiesFromBooking(bookingPayload));
+
+            if ((bookingPayload.career_readiness_form_status || 'Complete') === 'Complete') {
+                try {
+                    hubspotFormSubmission = await submitHubSpotFormSubmission(bookingPayload);
+                } catch (err) {
+                    console.error(
+                        'HubSpot form submission failed:',
+                        err.response?.data?.message || err.message || err
+                    );
+                    hubspotFormSubmission = {
+                        ok: false,
+                        detail: err.response?.data?.message || err.message || 'HubSpot form submission failed',
+                    };
+                }
+            }
         } catch (err) {
             hubspotError = err instanceof HubSpotSyncError
                 ? err.message
                 : err.message || 'HubSpot sync failed';
-            console.error('HubSpot full form sync failed:', hubspotError);
+            hubspotErrorDetail = serializeHubSpotError(err, {
+                attemptedPayload: buildHubSpotContactPropertiesFromBooking(bookingPayload),
+            });
+            console.error('HubSpot full form sync failed:', hubspotErrorDetail);
         }
     }
 
@@ -107,6 +127,8 @@ async function bookClass(date, bookingData = {}) {
         outlookEventsCreated,
         hubspot,
         hubspotError,
+        hubspotErrorDetail,
+        hubspotFormSubmission,
     };
 }
 
@@ -161,6 +183,7 @@ function buildBookingUpdate(body, date) {
         digital_signature: body.digital_signature,
         date_signed: normalizeDate(body.date_signed) || '',
         whats_your_employment_status_pick_only_1: body.whats_your_employment_status_pick_only_1,
+        are_you_unemployed: body.are_you_unemployed,
         career_readiness_form_status: body.career_readiness_form_status || 'Partial',
         date,
         is_complete: false,
