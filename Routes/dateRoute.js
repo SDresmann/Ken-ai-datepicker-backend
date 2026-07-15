@@ -1,7 +1,7 @@
 import express from 'express';
 import Booking from '../Modules/bookingModels.js';
 import { createOutlookEvent } from '../services/outlookServices.js';
-import { upsertHubSpotContact, inspectHubSpotSetup, inspectHubSpotFormsConfig, buildHubSpotContactPropertiesFromBooking, submitHubSpotFormSubmission } from '../services/hubspotService.js';
+import { upsertHubSpotContact, inspectHubSpotSetup, inspectHubSpotFormsConfig, buildHubSpotContactPropertiesFromBooking, submitHubSpotFormSubmission, getHubSpotFormGuid } from '../services/hubspotService.js';
 import { HubSpotSyncError, logHubSpotFailure, serializeHubSpotError } from '../services/hubspotErrors.js';
 import { sendClassSignupNotifications } from '../services/emailService.js';
 const router = express.Router();
@@ -303,6 +303,7 @@ router.post('/hubspot-step-one', async (req, res) => {
             hubspotFormSubmission,
             hubspotFormSubmissionError,
             hubspotFormSubmissionErrors,
+            hubspotFormGuid: getHubSpotFormGuid(),
             ...contact,
         });
     } catch (err) {

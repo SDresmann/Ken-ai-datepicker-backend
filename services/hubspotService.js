@@ -669,19 +669,18 @@ async function buildHubSpotFormFields(data = {}, stage = 'complete') {
   });
 }
 
-function getHubSpotFormGuid(stage = 'complete') {
-  const sharedGuid = process.env.HUBSPOT_FORM_GUID || DEFAULT_HUBSPOT_FORM_GUID;
-
-  if (stage === 'partial') {
-    return process.env.HUBSPOT_FORM_GUID_PARTIAL || sharedGuid;
-  }
-
-  return process.env.HUBSPOT_FORM_GUID_COMPLETE || sharedGuid;
+export function getHubSpotFormGuid() {
+  // Partial and complete both submit to the same HubSpot form.
+  return (
+    process.env.HUBSPOT_FORM_GUID
+    || process.env.HUBSPOT_FORM_GUID_COMPLETE
+    || DEFAULT_HUBSPOT_FORM_GUID
+  );
 }
 
 export async function submitHubSpotFormSubmission(data = {}, { stage = 'complete' } = {}) {
   const portalId = process.env.HUBSPOT_PORTAL_ID || DEFAULT_HUBSPOT_PORTAL_ID;
-  const formGuid = getHubSpotFormGuid(stage);
+  const formGuid = getHubSpotFormGuid();
 
   if (!portalId || !formGuid) {
     return { skipped: true, reason: 'HubSpot portal ID or form GUID is not configured', stage };
@@ -778,16 +777,25 @@ export async function inspectHubSpotFormsConfig() {
     console.warn('Could not resolve HubSpot portal from token:', err.response?.data?.message || err.message);
   }
 
+  const sharedFormGuid = getHubSpotFormGuid();
   const forms = {
+    shared: {
+      envKeys: ['HUBSPOT_FORM_GUID', 'HUBSPOT_FORM_GUID_COMPLETE'],
+      formGuid: sharedFormGuid,
+      when: 'Used for both partial (step 1 Next) and complete (final Submit) form submissions',
+      ignoredEnvKeys: process.env.HUBSPOT_FORM_GUID_PARTIAL
+        ? ['HUBSPOT_FORM_GUID_PARTIAL']
+        : [],
+    },
     partial: {
-      envKey: 'HUBSPOT_FORM_GUID_PARTIAL',
-      formGuid: getHubSpotFormGuid('partial'),
+      envKey: 'shared form GUID',
+      formGuid: sharedFormGuid,
       stage: 'partial',
       when: 'After user completes step 1 and clicks Next',
     },
     complete: {
-      envKey: 'HUBSPOT_FORM_GUID_COMPLETE',
-      formGuid: getHubSpotFormGuid('complete'),
+      envKey: 'shared form GUID',
+      formGuid: sharedFormGuid,
       stage: 'complete',
       when: 'After user submits the full application',
     },
