@@ -546,6 +546,49 @@ function objectToHubSpotFormFields(values = {}) {
     .map(([name, value]) => ({ name, value: String(value) }));
 }
 
+function buildHubSpotFormContext(data = {}, stage = 'complete') {
+  const pageNames = {
+    partial: 'Full Career Readiness Student Survey (RSH) - Partial',
+    complete: 'Full Career Readiness Student Survey (RSH) - Complete',
+  };
+
+  const context = {
+    pageUri: data.page_uri || 'https://ken-ai-datepicker-frontend.onrender.com',
+    pageName: data.page_name || pageNames[stage] || 'Career Readiness Registration',
+  };
+
+  if (data.hubspotutk) {
+    context.hutk = data.hubspotutk;
+  }
+
+  if (data.ip_address) {
+    context.ipAddress = data.ip_address;
+  }
+
+  return context;
+}
+
+function getHubSpotFormSubmitRequest(portalId, formGuid) {
+  const accessToken = getAccessToken();
+
+  if (accessToken) {
+    return {
+      url: `https://api.hsforms.com/submissions/v3/integration/secure/submit/${portalId}/${formGuid}`,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    };
+  }
+
+  return {
+    url: `${HUBSPOT_FORMS_SUBMIT_URL}/${portalId}/${formGuid}`,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  };
+}
+
 async function formatHubSpotFormDateField(propertyName, dateISO, config) {
   if (!dateISO) return '';
 
@@ -626,6 +669,11 @@ async function buildHubSpotFormFields(data = {}, stage = 'complete') {
     opt_in_check_for_emailing_texting_applicants: formatHubSpotFormBoolean(data.marketing_message_consent),
     ...formattedDates,
     ready_set_hire_survey_status: formStatus,
+    utm_campaign: data.utm_campaign || '',
+    utm_medium: data.utm_medium || '',
+    utm_source: data.utm_source || '',
+    utm_term: data.utm_term || '',
+    utm_content: data.utm_content || '',
   };
 
   if (stage === 'partial') {
@@ -714,30 +762,27 @@ export async function submitHubSpotFormSubmission(data = {}, { stage = 'complete
     );
   }
 
-  const pageNames = {
-    partial: 'Full_Career Readiness Student Survey (RSH) - Partial',
-    complete: 'Full_Career Readiness Student Survey (RSH) - Complete',
+  const submitRequest = getHubSpotFormSubmitRequest(portalId, formGuid);
+  const submissionBody = {
+    submittedAt: Date.now(),
+    fields,
+    context: buildHubSpotFormContext(data, stage),
   };
 
   try {
-    const response = await axios.post(
-      `${HUBSPOT_FORMS_SUBMIT_URL}/${portalId}/${formGuid}`,
-      {
-        submittedAt: Date.now(),
-        fields,
-        context: {
-          pageUri: data.page_uri || 'https://ken-ai-datepicker-frontend.onrender.com',
-          pageName: data.page_name || pageNames[stage] || 'Career Readiness Registration',
-        },
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+    const response = await axios.post(submitRequest.url, submissionBody, {
+      headers: submitRequest.headers,
+    });
 
-    return { ok: true, stage, formGuid, portalId, fieldsSubmitted: fields.length, submission: response.data };
+    return {
+      ok: true,
+      stage,
+      formGuid,
+      portalId,
+      fieldsSubmitted: fields.length,
+      submission: response.data,
+      storedOnPageUri: submissionBody.context.pageUri,
+    };
   } catch (err) {
     const hubspot = err.response?.data;
     const detail = hubspot?.message || hubspot?.errors?.map((entry) => entry.message).join(' | ') || err.message;
