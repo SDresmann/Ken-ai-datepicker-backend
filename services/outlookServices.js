@@ -6,6 +6,15 @@ let cca;
 const CLASS_EVENT_SUBJECT = 'Ready.Set.Hire. Class';
 const CLASS_ZOOM_LINK = 'https://us06web.zoom.us/j/5494309343?pwd=OXc5MkRvODhFQTV1RzJ5SkFUNlo5dz09';
 
+function buildClassEventSubject(bookingData = {}) {
+  const studentName = [
+    bookingData.first_name || bookingData.firstname,
+    bookingData.last_name || bookingData.lastname,
+  ].filter(Boolean).join(' ').trim();
+
+  return studentName ? `${CLASS_EVENT_SUBJECT} - ${studentName}` : CLASS_EVENT_SUBJECT;
+}
+
 function parseOutlookUserEmails() {
   return (process.env.MS_OUTLOOK_USER_EMAIL || '')
     .split(',')
@@ -38,7 +47,7 @@ export async function getGraphClient() {
   return Client.init({ authProvider: (done) => done(null, accessToken) });
 }
 
-export async function createOutlookEvent({ dateISO, startTime, endTime }) {
+export async function createOutlookEvent({ dateISO, startTime, endTime, bookingData = {} }) {
   const sender = getOutlookSenderEmail();
   const attendees = getSignupNotificationRecipients();
   if (!sender) {
@@ -47,7 +56,7 @@ export async function createOutlookEvent({ dateISO, startTime, endTime }) {
 
   const client = await getGraphClient();
   const eventPayload = {
-    subject: CLASS_EVENT_SUBJECT,
+    subject: buildClassEventSubject(bookingData),
     body: {
       contentType: 'Text',
       content: `Join Zoom Meeting: ${CLASS_ZOOM_LINK}`,

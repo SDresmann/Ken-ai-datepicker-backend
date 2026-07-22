@@ -75,13 +75,13 @@ async function bookClass(date, bookingData = {}) {
 
     if (isComplete) {
         try {
-            await createOutlookEvent({ dateISO: date, ...times });
+            await createOutlookEvent({ dateISO: date, ...times, bookingData: bookingPayload });
             outlookEventsCreated += 1;
 
             for (const additionalDate of getAdditionalWorkshopDates(bookingData)) {
                 const additionalTimes = getClassTimes(additionalDate);
                 if (additionalTimes) {
-                    await createOutlookEvent({ dateISO: additionalDate, ...additionalTimes });
+                    await createOutlookEvent({ dateISO: additionalDate, ...additionalTimes, bookingData: bookingPayload });
                     outlookEventsCreated += 1;
                 }
             }
