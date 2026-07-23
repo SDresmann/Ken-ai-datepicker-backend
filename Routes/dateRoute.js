@@ -30,7 +30,7 @@ function shouldUseAdditionalWorkshopDates(dateISO) {
 
 function getClassTimes(dateISO) {
     const day = new Date(`${dateISO}T12:00:00`).getDay(); // 0=Sun ... 6=Sat
-    if (day === 2 || day === 4) return { startTime: '18:00', endTime: '20:00' };
+    if (day === 2 || day === 4) return { startTime: '17:00', endTime: '19:00' };
     if (day === 3) return { startTime: '18:00', endTime: '19:00' };
     return null;
 }
