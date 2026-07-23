@@ -6,10 +6,32 @@ import { HubSpotSyncError, logHubSpotFailure, serializeHubSpotError } from '../s
 import { sendClassSignupNotifications } from '../services/emailService.js';
 const router = express.Router();
 
+function startOfDay(date) {
+    const copy = new Date(date);
+    copy.setHours(0, 0, 0, 0);
+    return copy;
+}
+
+function addDays(date, days) {
+    const copy = new Date(date);
+    copy.setDate(copy.getDate() + days);
+    return copy;
+}
+
+function getEndOfCurrentWeek() {
+    const today = startOfDay(new Date());
+    return addDays(today, 6 - today.getDay());
+}
+
+function shouldUseAdditionalWorkshopDates(dateISO) {
+    const date = startOfDay(new Date(`${dateISO}T12:00:00`));
+    return date.getDay() === 2 && date <= getEndOfCurrentWeek();
+}
+
 function getClassTimes(dateISO) {
     const day = new Date(`${dateISO}T12:00:00`).getDay(); // 0=Sun ... 6=Sat
-    if (day >= 2 && day <= 4) return { startTime: '18:00', endTime: '19:00' };
-    if (day === 5)            return { startTime: '14:00', endTime: '17:00' };
+    if (day === 2 || day === 4) return { startTime: '18:00', endTime: '20:00' };
+    if (day === 3) return { startTime: '18:00', endTime: '19:00' };
     return null;
 }
 
@@ -55,10 +77,17 @@ async function bookClass(date, bookingData = {}) {
     const classDate = bookingData.which_career_readiness_date_are_you_interested_in_attending_work || date;
     const formStatus = bookingData.career_readiness_form_status || 'Partial';
     const isComplete = formStatus === 'Complete';
+    const useAdditionalWorkshopDates = shouldUseAdditionalWorkshopDates(date);
     const bookingPayload = {
         ...bookingData,
         date,
         which_career_readiness_date_are_you_interested_in_attending_work: classDate,
+        choose_the_2nd_date_for_your_career_readiness_class_work: useAdditionalWorkshopDates
+            ? bookingData.choose_the_2nd_date_for_your_career_readiness_class_work
+            : '',
+        choose_the_3rd_date_for_your_career_readiness_class_work: useAdditionalWorkshopDates
+            ? bookingData.choose_the_3rd_date_for_your_career_readiness_class_work
+            : '',
         career_readiness_form_status: formStatus,
         is_complete: isComplete,
     };
@@ -78,7 +107,7 @@ async function bookClass(date, bookingData = {}) {
             await createOutlookEvent({ dateISO: date, ...times, bookingData: bookingPayload });
             outlookEventsCreated += 1;
 
-            for (const additionalDate of getAdditionalWorkshopDates(bookingData)) {
+            for (const additionalDate of getAdditionalWorkshopDates(bookingPayload)) {
                 const additionalTimes = getClassTimes(additionalDate);
                 if (additionalTimes) {
                     await createOutlookEvent({ dateISO: additionalDate, ...additionalTimes, bookingData: bookingPayload });
@@ -168,6 +197,8 @@ router.post('/', async (req, res) => {
 });
 
 function buildBookingUpdate(body, date) {
+    const useAdditionalWorkshopDates = shouldUseAdditionalWorkshopDates(date);
+
     return {
         first_name: body.first_name,
         last_name: body.last_name,
@@ -183,8 +214,12 @@ function buildBookingUpdate(body, date) {
         what_gender_do_you_identify_as_: body.what_gender_do_you_identify_as_,
         what_is_your_racial_and_ethnic_identity_: body.what_is_your_racial_and_ethnic_identity_,
         which_career_readiness_date_are_you_interested_in_attending_work: date,
-        choose_the_2nd_date_for_your_career_readiness_class_work: normalizeDate(body.choose_the_2nd_date_for_your_career_readiness_class_work) || '',
-        choose_the_3rd_date_for_your_career_readiness_class_work: normalizeDate(body.choose_the_3rd_date_for_your_career_readiness_class_work) || '',
+        choose_the_2nd_date_for_your_career_readiness_class_work: useAdditionalWorkshopDates
+            ? normalizeDate(body.choose_the_2nd_date_for_your_career_readiness_class_work) || ''
+            : '',
+        choose_the_3rd_date_for_your_career_readiness_class_work: useAdditionalWorkshopDates
+            ? normalizeDate(body.choose_the_3rd_date_for_your_career_readiness_class_work) || ''
+            : '',
         are_you_still_finishing_high_school: body.are_you_still_finishing_high_school,
         whats_the_full_name_of_your_school: body.whats_the_full_name_of_your_school,
         what_grade_are_you_currently_in: body.what_grade_are_you_currently_in,
